@@ -1,0 +1,2215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Idiom Quiz</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f5f9ff;
+  --surface: #ffffff;
+  --surface2: #dce9ff;
+  --text: #1f2a44;
+  --text-dim: #617392;
+  --accent: #10a37f;
+  --accent2: #3b82f6;
+  --green: #16a34a;
+  --orange: #f59e0b;
+  --red: #ef4444;
+  --blue: #3b82f6;
+  --radius: 12px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background:
+    radial-gradient(circle at 20% 0%, #ffffff 0%, rgba(255,255,255,0) 45%),
+    linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+.container {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+h1 { font-size: 1.8rem; font-weight: 700; }
+h2 { font-size: 1.3rem; font-weight: 600; margin-bottom: 16px; }
+
+button {
+  border: none;
+  border-radius: var(--radius);
+  padding: 12px 24px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.1s, opacity 0.2s;
+}
+button:active { transform: scale(0.97); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  width: 100%;
+  padding: 16px;
+  font-size: 1.1rem;
+}
+.btn-secondary {
+  background: var(--surface2);
+  color: var(--text);
+  width: 100%;
+  padding: 14px;
+}
+.btn-small {
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  background: var(--surface2);
+  color: var(--text);
+}
+
+input, textarea, select {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1rem;
+  font-family: inherit;
+}
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+textarea { resize: vertical; min-height: 80px; }
+
+.screen { display: none; }
+.screen.active { display: block; }
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 32px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--surface2);
+}
+.header .back {
+  background: none;
+  color: var(--text-dim);
+  padding: 8px;
+  font-size: 1.2rem;
+}
+
+/* Dashboard */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.bucket-grid {
+  grid-template-columns: repeat(5, 1fr);
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--surface2);
+  box-shadow: 0 8px 22px rgba(59, 130, 246, 0.08);
+  border-radius: var(--radius);
+  padding: 20px 16px;
+  text-align: center;
+}
+.stat-card .number {
+  font-size: 2rem;
+  font-weight: 700;
+  display: block;
+}
+.stat-card .label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.stat-card.due .number { color: var(--accent); }
+.stat-card.total .number { color: var(--blue); }
+.stat-card.mastered .number { color: var(--green); }
+
+.dashboard-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fill-target-dialog {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 42, 68, 0.28);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 16px;
+}
+.fill-target-dialog.visible {
+  display: flex;
+}
+.fill-target-card {
+  width: min(460px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.fill-target-card h3 {
+  font-size: 1rem;
+  margin-bottom: 10px;
+}
+.fill-target-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.fill-target-grid button {
+  width: 100%;
+}
+.fill-target-btn {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #fff;
+}
+.fill-target-new { background: var(--blue); }
+.fill-target-nope { background: var(--red); }
+.fill-target-kinda { background: var(--orange); }
+.fill-target-nailed { background: var(--green); }
+.fill-target-skip {
+  background: var(--surface2);
+  color: var(--text) !important;
+}
+.fill-target-cancel {
+  background: transparent;
+  border: 1px solid var(--surface2);
+  color: var(--text-dim) !important;
+}
+
+/* Review */
+.progress-bar-container {
+  background: var(--surface);
+  border-radius: 8px;
+  height: 8px;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 8px;
+  transition: width 0.3s ease;
+}
+.progress-text {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin-bottom: 8px;
+}
+
+.flashcard {
+  background: var(--surface);
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius);
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 32px;
+  margin-bottom: 24px;
+  perspective: 1000px;
+  cursor: pointer;
+  transition: box-shadow 0.2s;
+}
+.flashcard:hover { box-shadow: 0 12px 28px rgba(59, 130, 246, 0.16); }
+
+.flashcard .phrase {
+  font-size: 1.8rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 8px;
+}
+.flashcard .category-badge {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: rgba(16, 163, 127, 0.14);
+  padding: 4px 12px;
+  border-radius: 20px;
+  margin-bottom: 24px;
+}
+.flashcard .divider {
+  width: 60px;
+  height: 2px;
+  background: var(--surface2);
+  margin: 16px 0;
+}
+.flashcard .meaning {
+  font-size: 1.1rem;
+  text-align: center;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+.flashcard .example {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  font-style: italic;
+  text-align: center;
+}
+.flashcard .tap-hint {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin-top: 16px;
+}
+.flashcard .source-badge {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  background: var(--bg);
+  padding: 3px 10px;
+  border-radius: 12px;
+  margin-top: 12px;
+}
+.card-item .card-source {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+/* Regenerate example button */
+.btn-regen-example {
+  background: none;
+  border: 1px solid var(--text-dim);
+  color: var(--text-dim);
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  border-radius: 16px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: all 0.2s;
+}
+.btn-regen-example:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Review card action buttons (edit/delete) */
+.review-card-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.btn-edit-review {
+  background: none;
+  border: 1px solid var(--text-dim);
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  padding: 6px 14px;
+}
+.btn-edit-review:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.btn-delete-review {
+  background: none;
+  border: 1px solid var(--text-dim);
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  padding: 6px 14px;
+}
+.btn-delete-review:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.answer-section { display: none; }
+.answer-section.visible { display: block; }
+
+.rating-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.rating-buttons button {
+  padding: 14px 4px;
+  font-size: 0.85rem;
+  color: #fff;
+  font-weight: 600;
+}
+.btn-nope { background: var(--red); }
+.btn-kinda { background: var(--orange); }
+.btn-nailed { background: var(--green); }
+.btn-skip { background: var(--surface2); color: var(--text-dim) !important; }
+
+.show-answer-btn {
+  width: 100%;
+  padding: 16px;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 1.05rem;
+}
+
+.review-mode-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 0;
+}
+.review-mode-buttons button {
+  padding: 16px;
+  font-size: 0.9rem;
+}
+.btn-type-answer {
+  background: var(--accent2);
+  color: #fff;
+}
+.btn-fill-blank {
+  background: var(--blue);
+  color: #fff;
+}
+
+/* Typed answer area */
+.type-answer-section {
+  margin-bottom: 24px;
+  display: none;
+}
+.type-answer-section.visible { display: block; }
+
+.type-answer-section textarea {
+  min-height: 60px;
+  margin-bottom: 8px;
+}
+.submit-answer-btn {
+  width: 100%;
+  padding: 14px;
+  background: var(--accent2);
+  color: #fff;
+  font-size: 1rem;
+}
+.submit-answer-btn:disabled {
+  opacity: 0.5;
+}
+
+/* Fill in the Blank mode */
+.fill-blank-section {
+  margin-bottom: 24px;
+  display: none;
+}
+.fill-blank-section.visible { display: block; }
+
+.blank-sentence {
+  font-size: 1.28rem;
+  line-height: 1.75;
+  color: var(--text);
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  border: 1px solid var(--surface2);
+  padding: 22px 24px;
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  text-align: left;
+  letter-spacing: 0.01em;
+}
+.blank-slot {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  background: rgba(233, 69, 96, 0.12);
+  border-radius: 8px;
+  padding: 2px 8px;
+}
+.blank-word-count {
+  margin-top: 12px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  letter-spacing: 0.03em;
+}
+
+.blank-meaning-hint {
+  font-size: 1rem;
+  line-height: 1.55;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius);
+  text-align: left;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+}
+.blank-hint-label {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.74rem;
+  margin-right: 8px;
+}
+
+.fill-blank-section input {
+  margin-bottom: 8px;
+  font-size: 1.1rem;
+  text-align: center;
+}
+
+.blank-actions {
+  display: flex;
+  gap: 8px;
+}
+.blank-actions .btn-hint {
+  padding: 14px 20px;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 0.95rem;
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
+.blank-actions .btn-hint:disabled {
+  opacity: 0.4;
+}
+.blank-actions .submit-answer-btn {
+  flex: 1;
+}
+
+.hint-display {
+  margin-top: 10px;
+  font-size: 0.9rem;
+  color: var(--orange);
+  background: rgba(230, 126, 34, 0.1);
+  padding: 10px 14px;
+  border-radius: 8px;
+  text-align: center;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  letter-spacing: 0.05em;
+  display: none;
+}
+.hint-display.visible { display: block; }
+
+/* LLM Feedback */
+.llm-feedback {
+  display: none;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+  border-left: 4px solid var(--text-dim);
+}
+.llm-feedback.visible { display: block; }
+.llm-feedback.correct { border-left-color: var(--green); }
+.llm-feedback.partial { border-left-color: var(--orange); }
+.llm-feedback.incorrect { border-left-color: var(--red); }
+
+.llm-feedback .verdict {
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin-bottom: 8px;
+}
+.llm-feedback.correct .verdict { color: var(--green); }
+.llm-feedback.partial .verdict { color: var(--orange); }
+.llm-feedback.incorrect .verdict { color: var(--red); }
+
+.llm-feedback .explanation {
+  font-size: 0.95rem;
+  color: var(--text);
+  line-height: 1.5;
+}
+.llm-feedback .your-answer-label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.llm-feedback .your-answer-text {
+  font-size: 0.95rem;
+  color: var(--text);
+  background: var(--bg);
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.loading-spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Session Summary */
+.summary-card {
+  background: var(--surface);
+  border: 1px solid var(--surface2);
+  box-shadow: 0 10px 26px rgba(59, 130, 246, 0.08);
+  border-radius: var(--radius);
+  padding: 32px;
+  text-align: center;
+  margin-bottom: 24px;
+}
+.summary-card h2 { margin-bottom: 24px; }
+.summary-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.summary-stat .number {
+  font-size: 1.8rem;
+  font-weight: 700;
+  display: block;
+}
+.summary-stat .label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+/* Browse */
+.search-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.search-bar input { flex: 1; }
+.filter-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.filter-chip {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  background: var(--surface);
+  color: var(--text-dim);
+  cursor: pointer;
+  border: 1px solid var(--surface2);
+  transition: all 0.2s;
+}
+.filter-chip.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.card-list { display: flex; flex-direction: column; gap: 8px; }
+.card-item {
+  background: var(--surface);
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.card-item:hover { background: var(--surface2); }
+.card-item .card-phrase {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.card-item .card-meta {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.card-item .card-status {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+.status-due { background: rgba(59, 130, 246, 0.14); color: var(--blue); }
+.status-learning { background: rgba(245, 158, 11, 0.16); color: #b45309; }
+.status-mastered { background: rgba(22, 163, 74, 0.14); color: var(--green); }
+
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-dim);
+}
+
+/* Add/Edit Form */
+.form-group { margin-bottom: 16px; }
+.form-group label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 24px;
+}
+.form-actions button { flex: 1; }
+
+.delete-btn {
+  background: none;
+  color: var(--red);
+  border: 1px solid var(--red);
+  margin-top: 12px;
+}
+
+.import-section {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--surface2);
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: var(--surface2);
+  color: var(--text);
+  padding: 12px 24px;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  transition: transform 0.3s ease;
+  z-index: 100;
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+
+@media (max-width: 480px) {
+  .container { padding: 16px; }
+  h1 { font-size: 1.4rem; }
+  .flashcard { min-height: 220px; padding: 28px 20px; }
+  .flashcard .phrase { font-size: 1.4rem; }
+  .stats-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .bucket-grid { grid-template-columns: repeat(3, 1fr); }
+  .stat-card { padding: 14px 8px; }
+  .stat-card .number { font-size: 1.5rem; }
+  .rating-buttons { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .rating-buttons button { padding: 12px 4px; font-size: 0.8rem; }
+  .fill-target-grid { grid-template-columns: 1fr; }
+  .review-mode-buttons { grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .review-mode-buttons button { padding: 12px 6px; font-size: 0.8rem; }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Dashboard Screen -->
+  <div id="dashboard" class="screen active">
+    <div class="header">
+      <h1>Idiom Quiz</h1>
+    </div>
+    <div class="stats-grid bucket-grid">
+      <div class="stat-card bucket-card" onclick="showBucket('nope')" style="cursor:pointer">
+        <span class="number" id="nope-count" style="color:var(--red)">0</span>
+        <span class="label">Nope</span>
+      </div>
+      <div class="stat-card bucket-card" onclick="showBucket('kinda')" style="cursor:pointer">
+        <span class="number" id="kinda-count" style="color:var(--orange)">0</span>
+        <span class="label">Kinda</span>
+      </div>
+      <div class="stat-card bucket-card" onclick="showBucket('nailed')" style="cursor:pointer">
+        <span class="number" id="nailed-count" style="color:var(--green)">0</span>
+        <span class="label">Nailed it</span>
+      </div>
+      <div class="stat-card bucket-card" onclick="showBucket('skip')" style="cursor:pointer">
+        <span class="number" id="skip-count" style="color:var(--text-dim)">0</span>
+        <span class="label">Not Useful</span>
+      </div>
+      <div class="stat-card bucket-card" onclick="showBucket('new')" style="cursor:pointer">
+        <span class="number" id="new-count" style="color:var(--blue)">0</span>
+        <span class="label">New</span>
+      </div>
+    </div>
+    <div class="dashboard-actions">
+      <button class="btn-primary" id="start-fill-blank-btn" onclick="openFillBlankTargetDialog()">Fill in the Blank</button>
+      <button class="btn-primary" id="start-write-sentence-btn" onclick="startWriteSentence()" style="background:var(--accent2)">Write a Sentence</button>
+      <button class="btn-secondary" onclick="activeBucket=null;showScreen('browse')">Browse All Cards</button>
+      <button class="btn-secondary" onclick="showAddForm()">Add New Card</button>
+    </div>
+  </div>
+
+  <!-- Review Screen -->
+  <div id="review" class="screen">
+    <div class="header">
+      <button class="back" onclick="endReview()">&larr;</button>
+      <h2>Review</h2>
+      <div></div>
+    </div>
+    <div class="progress-text" id="review-progress-text">0 / 0</div>
+    <div class="progress-bar-container">
+      <div class="progress-bar-fill" id="review-progress-bar"></div>
+    </div>
+    <div class="flashcard" id="flashcard" onclick="onFlashcardTap()">
+      <div class="category-badge" id="card-category"></div>
+      <div class="phrase" id="card-phrase"></div>
+      <div class="tap-hint" id="tap-hint">Tap to reveal</div>
+      <div class="divider" id="card-divider" style="display:none"></div>
+      <div class="meaning" id="card-meaning" style="display:none"></div>
+      <div class="example" id="card-example" style="display:none"></div>
+      <button class="btn-regen-example" id="btn-regen-example" onclick="regenerateExample(event)" style="display:none" title="Get a different example">&#x21bb; New Example</button>
+      <div class="source-badge" id="card-source" style="display:none"></div>
+    </div>
+    <div class="review-card-actions" id="review-card-actions">
+      <button class="btn-small btn-edit-review" onclick="editCurrentCard()" title="Edit this card">&#9998; Edit</button>
+      <button class="btn-small btn-delete-review" onclick="deleteCurrentCard()" title="Delete this card">&#128465; Delete</button>
+    </div>
+    <div class="type-answer-section" id="type-answer-section">
+      <textarea id="typed-answer" placeholder="Write a sentence using this phrase..." rows="3"></textarea>
+      <button class="submit-answer-btn" id="submit-answer-btn" onclick="submitTypedAnswer()">Check My Answer</button>
+    </div>
+    <div class="fill-blank-section" id="fill-blank-section">
+      <div class="blank-sentence" id="blank-sentence">Loading...</div>
+      <div class="blank-meaning-hint" id="blank-meaning-hint"></div>
+      <input type="text" id="blank-answer" placeholder="Fill in the blank..." autocomplete="off">
+      <div class="blank-actions">
+        <button class="btn-hint" id="btn-hint" onclick="getBlankHint()">&#128161; Hint</button>
+        <button class="submit-answer-btn" id="submit-blank-btn" onclick="submitBlankAnswer()">Check Answer</button>
+      </div>
+      <div class="hint-display" id="hint-display"></div>
+    </div>
+    <div class="llm-feedback" id="llm-feedback">
+      <div class="your-answer-label" id="feedback-label">Your sentence:</div>
+      <div class="your-answer-text" id="feedback-your-answer"></div>
+      <div class="verdict" id="feedback-verdict"></div>
+      <div class="explanation" id="feedback-explanation"></div>
+    </div>
+    <div class="answer-section" id="answer-section">
+      <div class="rating-buttons">
+        <button class="btn-nope" onclick="rateCard(0)">Nope</button>
+        <button class="btn-kinda" onclick="rateCard(3)">Kinda</button>
+        <button class="btn-nailed" onclick="rateCard(5)">Nailed it</button>
+        <button class="btn-skip" onclick="rateCard(-1)">Not Useful</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary Screen -->
+  <div id="summary" class="screen">
+    <div class="header">
+      <div></div>
+      <h2>Session Complete</h2>
+      <div></div>
+    </div>
+    <div class="summary-card">
+      <h2>Nice work!</h2>
+      <div class="summary-stats">
+        <div class="summary-stat">
+          <span class="number" id="summary-reviewed" style="color:var(--blue)">0</span>
+          <span class="label">Reviewed</span>
+        </div>
+        <div class="summary-stat">
+          <span class="number" id="summary-accuracy" style="color:var(--green)">0%</span>
+          <span class="label">Good or better</span>
+        </div>
+      </div>
+    </div>
+    <button class="btn-primary" onclick="showScreen('dashboard')">Back to Dashboard</button>
+  </div>
+
+  <!-- Browse Screen -->
+  <div id="browse" class="screen">
+    <div class="header">
+      <button class="back" onclick="showScreen('dashboard')">&larr;</button>
+      <h2 id="browse-title">All Cards</h2>
+      <button class="btn-small" onclick="showAddForm()">+ Add</button>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Search cards..." oninput="renderBrowseList()">
+    </div>
+    <div class="filter-row" id="filter-row">
+      <span class="filter-chip active" data-filter="all" onclick="setFilter('all')">All</span>
+      <span class="filter-chip" data-filter="idiom" onclick="setFilter('idiom')">Idioms</span>
+      <span class="filter-chip" data-filter="word" onclick="setFilter('word')">Words</span>
+      <span class="filter-chip" data-filter="phrase" onclick="setFilter('phrase')">Phrases</span>
+    </div>
+    <div class="card-list" id="card-list"></div>
+  </div>
+
+  <!-- Add/Edit Screen -->
+  <div id="add-edit" class="screen">
+    <div class="header">
+      <button class="back" onclick="cancelEdit()">&larr;</button>
+      <h2 id="form-title">Add Card</h2>
+      <div></div>
+    </div>
+    <div class="form-group">
+      <label>Phrase / Word / Idiom</label>
+      <input type="text" id="input-phrase" placeholder="e.g. bite the bullet">
+    </div>
+    <div class="form-group">
+      <label>Meaning</label>
+      <textarea id="input-meaning" placeholder="e.g. To endure a painful situation courageously"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Example (optional)</label>
+      <textarea id="input-example" placeholder="e.g. I hate going to the dentist, but I'll just have to bite the bullet."></textarea>
+    </div>
+    <div class="form-group">
+      <label>Category</label>
+      <select id="input-category">
+        <option value="idiom">Idiom</option>
+        <option value="word">Word</option>
+        <option value="phrase">Phrase</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Bucket</label>
+      <select id="input-bucket">
+        <option value="">Unassigned</option>
+        <option value="nope">Nope</option>
+        <option value="kinda">Kinda</option>
+        <option value="nailed">Nailed it</option>
+        <option value="skip">Not Useful</option>
+      </select>
+    </div>
+    <div class="form-actions">
+      <button class="btn-secondary" onclick="cancelEdit()">Cancel</button>
+      <button class="btn-primary" id="save-card-btn" onclick="saveCard()">Save</button>
+    </div>
+    <button class="btn-secondary delete-btn" id="delete-card-btn" style="display:none" onclick="deleteCard()">Delete Card</button>
+
+    <div class="import-section">
+      <h2>Bulk Import (JSON)</h2>
+      <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:12px;">
+        Paste a JSON array of objects with "phrase", "meaning", "example" (optional), and "category" (optional) fields.
+      </p>
+      <textarea id="import-json" rows="5" placeholder='[{"phrase":"...", "meaning":"...", "example":"...", "category":"idiom"}]'></textarea>
+      <button class="btn-secondary" style="margin-top:8px" onclick="importJSON()">Import</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="fill-target-dialog" id="fill-target-dialog" onclick="onFillTargetBackdrop(event)">
+  <div class="fill-target-card">
+    <h3>Choose a Fill in the Blank list</h3>
+    <div class="fill-target-grid">
+      <button class="fill-target-btn fill-target-new" onclick="startFillBlank('new')">New</button>
+      <button class="fill-target-btn fill-target-nope" onclick="startFillBlank('nope')">Nope</button>
+      <button class="fill-target-btn fill-target-kinda" onclick="startFillBlank('kinda')">Kinda</button>
+      <button class="fill-target-btn fill-target-nailed" onclick="startFillBlank('nailed')">Nailed it</button>
+      <button class="fill-target-btn fill-target-skip" onclick="startFillBlank('skip')">Not Useful</button>
+      <button class="fill-target-btn fill-target-cancel" onclick="closeFillBlankTargetDialog()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Data ───────────────────────────────────────────────────────────────
+
+const STORAGE_KEY = 'idiom-quiz-cards';
+
+const SAMPLE_DATA = [
+  { phrase: "Bite the bullet", meaning: "To endure a painful or difficult situation courageously", example: "I hate going to the dentist, but I'll just have to bite the bullet.", category: "idiom" },
+  { phrase: "Break the ice", meaning: "To initiate conversation in a social setting; to make people feel more comfortable", example: "He told a joke to break the ice at the meeting.", category: "idiom" },
+  { phrase: "A blessing in disguise", meaning: "Something that seems bad at first but turns out to be good", example: "Losing that job was a blessing in disguise — I found a much better one.", category: "idiom" },
+  { phrase: "Cut corners", meaning: "To do something in the easiest or cheapest way, often sacrificing quality", example: "The builder cut corners and the roof started leaking within a year.", category: "idiom" },
+  { phrase: "Hit the nail on the head", meaning: "To describe exactly what is causing a situation or problem", example: "You hit the nail on the head when you said the issue was communication.", category: "idiom" },
+  { phrase: "Under the weather", meaning: "Feeling ill or sick", example: "I'm feeling a bit under the weather today, so I'll stay home.", category: "idiom" },
+  { phrase: "The ball is in your court", meaning: "It's your turn to take action or make a decision", example: "I've made my offer — the ball is in your court now.", category: "idiom" },
+  { phrase: "Spill the beans", meaning: "To reveal a secret", example: "Come on, spill the beans! What's the surprise?", category: "idiom" },
+  { phrase: "Burning the midnight oil", meaning: "Working late into the night", example: "She's been burning the midnight oil to finish the project.", category: "idiom" },
+  { phrase: "Barking up the wrong tree", meaning: "To pursue a mistaken or misguided course of action", example: "If you think I did it, you're barking up the wrong tree.", category: "idiom" },
+  { phrase: "Cost an arm and a leg", meaning: "To be extremely expensive", example: "That designer handbag must have cost an arm and a leg.", category: "idiom" },
+  { phrase: "Let the cat out of the bag", meaning: "To accidentally reveal a secret", example: "He let the cat out of the bag about the surprise party.", category: "idiom" },
+  { phrase: "Once in a blue moon", meaning: "Very rarely", example: "He only calls once in a blue moon.", category: "idiom" },
+  { phrase: "Piece of cake", meaning: "Something very easy to do", example: "The exam was a piece of cake.", category: "idiom" },
+  { phrase: "Add insult to injury", meaning: "To make a bad situation even worse", example: "To add insult to injury, they charged me for the broken item.", category: "idiom" },
+  { phrase: "Eloquent", meaning: "Fluent or persuasive in speaking or writing", example: "She gave an eloquent speech that moved the entire audience.", category: "word" },
+  { phrase: "Serendipity", meaning: "The occurrence of events by chance in a happy way", example: "Finding that bookshop was pure serendipity.", category: "word" },
+  { phrase: "Ubiquitous", meaning: "Present, appearing, or found everywhere", example: "Smartphones have become ubiquitous in modern life.", category: "word" },
+  { phrase: "The devil is in the details", meaning: "Small things in plans and schemes that are overlooked can cause serious problems later", example: "The contract looks fine, but the devil is in the details.", category: "phrase" },
+  { phrase: "Actions speak louder than words", meaning: "What someone does is more important than what they say", example: "He keeps promising to help, but actions speak louder than words.", category: "phrase" },
+];
+
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function getToday() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function loadCards() {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored) return JSON.parse(stored);
+
+  // First launch — seed with sample data
+  const today = getToday();
+  const cards = SAMPLE_DATA.map(d => ({
+    id: generateId(),
+    phrase: d.phrase,
+    meaning: d.meaning,
+    example: d.example || '',
+    category: d.category || 'idiom',
+    source: 'Sample',
+    easeFactor: 2.5,
+    interval: 0,
+    repetitions: 0,
+    nextReview: today,
+    lastReview: null
+  }));
+  saveCards(cards);
+  return cards;
+}
+
+function saveCards(cards) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
+}
+
+let cards = loadCards();
+
+// ─── SM-2 Algorithm ─────────────────────────────────────────────────────
+
+function sm2(card, quality) {
+  let { easeFactor, interval, repetitions } = card;
+
+  if (quality < 3) {
+    // Failed — reset
+    repetitions = 0;
+    interval = 1;
+  } else {
+    // Passed
+    if (repetitions === 0) {
+      interval = 1;
+    } else if (repetitions === 1) {
+      interval = 6;
+    } else {
+      interval = Math.round(interval * easeFactor);
+    }
+    repetitions++;
+  }
+
+  // Update ease factor
+  easeFactor = easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+  if (easeFactor < 1.3) easeFactor = 1.3;
+
+  const nextDate = new Date();
+  nextDate.setDate(nextDate.getDate() + interval);
+  const nextReview = nextDate.toISOString().split('T')[0];
+
+  return {
+    easeFactor: Math.round(easeFactor * 100) / 100,
+    interval,
+    repetitions,
+    nextReview,
+    lastReview: getToday()
+  };
+}
+
+function previewInterval(card, quality) {
+  const result = sm2(card, quality);
+  return result.interval;
+}
+
+function formatInterval(days) {
+  if (days === 1) return '1d';
+  if (days < 30) return days + 'd';
+  if (days < 365) return Math.round(days / 30) + 'mo';
+  return Math.round(days / 365 * 10) / 10 + 'y';
+}
+
+// ─── Screens ────────────────────────────────────────────────────────────
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+
+  if (id === 'dashboard') updateDashboard();
+  if (id === 'browse') {
+    if (!activeBucket) document.getElementById('browse-title').textContent = 'All Cards';
+    renderBrowseList();
+  }
+}
+
+// ─── Dashboard ──────────────────────────────────────────────────────────
+
+function getDueCards() {
+  const today = getToday();
+  return cards.filter(c => c.nextReview <= today && c.bucket !== 'skip');
+}
+
+function getMasteredCards() {
+  return cards.filter(c => c.interval >= 21); // 21+ day interval = mastered
+}
+
+function updateDashboard() {
+  const due = getDueCards();
+
+  // Bucket counts
+  document.getElementById('nope-count').textContent = cards.filter(c => c.bucket === 'nope').length;
+  document.getElementById('kinda-count').textContent = cards.filter(c => c.bucket === 'kinda').length;
+  document.getElementById('nailed-count').textContent = cards.filter(c => c.bucket === 'nailed').length;
+  document.getElementById('skip-count').textContent = cards.filter(c => c.bucket === 'skip').length;
+  document.getElementById('new-count').textContent = cards.filter(c => !c.bucket).length;
+
+  const noDue = due.length === 0;
+  const noCards = cards.length === 0;
+  const fillBtn = document.getElementById('start-fill-blank-btn');
+  const writeBtn = document.getElementById('start-write-sentence-btn');
+  fillBtn.disabled = noCards;
+  writeBtn.disabled = noDue;
+  fillBtn.textContent = noCards ? 'No cards yet' : 'Fill in the Blank';
+  writeBtn.textContent = noDue ? 'Nothing due — come back later' : 'Write a Sentence';
+}
+
+// ─── Review ─────────────────────────────────────────────────────────────
+
+let reviewQueue = [];
+let reviewIndex = 0;
+let sessionStats = { reviewed: 0, goodOrBetter: 0 };
+let answerRevealed = false;
+let currentBlankData = null; // { sentence, hint, answer, hintLevel }
+let reviewMode = 'fill-blank'; // 'fill-blank' or 'write-sentence'
+let fillBlankTarget = null; // 'new' | 'nope' | 'kinda' | 'nailed' | 'skip'
+
+function getCardsByBucket(bucket) {
+  if (!bucket) return getDueCards();
+  if (bucket === 'new') return cards.filter(c => !c.bucket);
+  return cards.filter(c => c.bucket === bucket);
+}
+
+function bucketLabel(bucket) {
+  const labels = {
+    new: 'New',
+    nope: 'Nope',
+    kinda: 'Kinda',
+    nailed: 'Nailed it',
+    skip: 'Not Useful'
+  };
+  return labels[bucket] || bucket;
+}
+
+function openFillBlankTargetDialog() {
+  if (cards.length === 0) return;
+  const dialog = document.getElementById('fill-target-dialog');
+  if (dialog) dialog.classList.add('visible');
+}
+
+function closeFillBlankTargetDialog() {
+  const dialog = document.getElementById('fill-target-dialog');
+  if (dialog) dialog.classList.remove('visible');
+}
+
+function onFillTargetBackdrop(event) {
+  if (event.target && event.target.id === 'fill-target-dialog') {
+    closeFillBlankTargetDialog();
+  }
+}
+
+function startFillBlank(bucket) {
+  reviewMode = 'fill-blank';
+  fillBlankTarget = bucket || null;
+  reviewQueue = getCardsByBucket(fillBlankTarget).sort(() => Math.random() - 0.5);
+  closeFillBlankTargetDialog();
+
+  if (reviewQueue.length === 0) {
+    showToast(`No cards in ${bucketLabel(fillBlankTarget)}`);
+    return;
+  }
+  reviewIndex = 0;
+  sessionStats = { reviewed: 0, goodOrBetter: 0 };
+  showScreen('review');
+  showCurrentCard();
+}
+
+function startWriteSentence() {
+  reviewMode = 'write-sentence';
+  reviewQueue = getDueCards().sort(() => Math.random() - 0.5);
+  if (reviewQueue.length === 0) return;
+  reviewIndex = 0;
+  sessionStats = { reviewed: 0, goodOrBetter: 0 };
+  showScreen('review');
+  showCurrentCard();
+}
+
+function showCurrentCard() {
+  if (reviewIndex >= reviewQueue.length) {
+    showSummary();
+    return;
+  }
+
+  const card = reviewQueue[reviewIndex];
+  answerRevealed = false;
+
+  document.getElementById('card-category').textContent = card.category;
+  document.getElementById('card-phrase').textContent = card.phrase;
+  document.getElementById('card-meaning').textContent = card.meaning;
+  document.getElementById('card-example').textContent = card.example ? `"${card.example}"` : '';
+  document.getElementById('card-source').textContent = card.source || '';
+
+  // Hide answer and reset UI
+  document.getElementById('card-meaning').style.display = 'none';
+  document.getElementById('card-example').style.display = 'none';
+  document.getElementById('card-divider').style.display = 'none';
+  document.getElementById('card-source').style.display = 'none';
+  document.getElementById('btn-regen-example').style.display = 'none';
+  document.getElementById('tap-hint').style.display = 'none';
+  document.getElementById('type-answer-section').classList.remove('visible');
+  document.getElementById('fill-blank-section').classList.remove('visible');
+  document.getElementById('llm-feedback').className = 'llm-feedback';
+  document.getElementById('typed-answer').value = '';
+  document.getElementById('blank-answer').value = '';
+  document.getElementById('hint-display').classList.remove('visible');
+  document.getElementById('hint-display').textContent = '';
+  document.getElementById('btn-hint').disabled = false;
+  document.getElementById('btn-hint').innerHTML = '&#128161; Hint';
+  document.getElementById('answer-section').classList.remove('visible');
+  currentBlankData = null;
+
+  // Update progress
+  const total = reviewQueue.length;
+  document.getElementById('review-progress-text').textContent = `${reviewIndex + 1} / ${total}`;
+  document.getElementById('review-progress-bar').style.width = `${((reviewIndex) / total) * 100}%`;
+
+
+  // Auto-enter the selected mode
+  if (reviewMode === 'fill-blank') {
+    showFillBlank();
+  } else if (reviewMode === 'write-sentence') {
+    showTypeAnswer();
+  }
+}
+
+function onFlashcardTap() {
+  // No-op — mode is auto-entered from dashboard
+}
+
+function revealAnswer() {
+  if (answerRevealed) return;
+  answerRevealed = true;
+
+  const card = reviewQueue[reviewIndex];
+
+  document.getElementById('card-meaning').style.display = 'block';
+  document.getElementById('card-example').style.display = 'block';
+  document.getElementById('card-divider').style.display = 'block';
+  document.getElementById('tap-hint').style.display = 'none';
+  document.getElementById('type-answer-section').classList.remove('visible');
+  document.getElementById('answer-section').classList.add('visible');
+  document.getElementById('btn-regen-example').style.display = 'inline-block';
+  if (card.source) document.getElementById('card-source').style.display = 'block';
+
+  // Generate example on-the-fly if missing
+  if (!card.example) {
+    fetchExample(card);
+  }
+}
+
+async function regenerateExample(event) {
+  if (event) event.stopPropagation(); // Don't trigger flashcard click
+  const card = reviewQueue[reviewIndex];
+  if (!card) return;
+
+  const exEl = document.getElementById('card-example');
+  const btn = document.getElementById('btn-regen-example');
+  btn.disabled = true;
+  btn.textContent = '...';
+  exEl.textContent = 'Generating new example...';
+  exEl.style.opacity = '0.5';
+
+  try {
+    const response = await fetch('/api/generate-example', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phrase: card.phrase, meaning: card.meaning })
+    });
+
+    if (!response.ok) throw new Error('Failed');
+
+    const data = await response.json();
+    if (data.example) {
+      card.example = data.example;
+      exEl.textContent = `"${data.example}"`;
+
+      // Save to localStorage
+      const idx = cards.findIndex(c => c.id === card.id);
+      if (idx !== -1) cards[idx].example = data.example;
+      saveCards(cards);
+    }
+  } catch {
+    exEl.textContent = card.example ? `"${card.example}"` : '';
+    showToast('Failed to generate example');
+  } finally {
+    exEl.style.opacity = '1';
+    btn.disabled = false;
+    btn.innerHTML = '&#x21bb; New Example';
+  }
+}
+
+// ─── Fill in the Blank Mode ─────────────────────────────────────────────
+
+async function showFillBlank() {
+  document.getElementById('flashcard').style.display = 'none';
+  document.getElementById('review-card-actions').style.display = 'none';
+  document.getElementById('fill-blank-section').classList.add('visible');
+  document.getElementById('blank-answer').value = '';
+  document.getElementById('hint-display').classList.remove('visible');
+  document.getElementById('hint-display').textContent = '';
+  document.getElementById('btn-hint').disabled = false;
+  document.getElementById('btn-hint').innerHTML = '&#128161; Hint';
+
+  const card = reviewQueue[reviewIndex];
+  const sentenceEl = document.getElementById('blank-sentence');
+  const hintEl = document.getElementById('blank-meaning-hint');
+  const inputEl = document.getElementById('blank-answer');
+  const submitBtn = document.getElementById('submit-blank-btn');
+
+  sentenceEl.textContent = 'Generating sentence...';
+  sentenceEl.style.opacity = '0.5';
+  hintEl.textContent = '';
+  inputEl.disabled = true;
+  submitBtn.disabled = true;
+
+  try {
+    const response = await fetch('/api/generate-blank', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phrase: card.phrase, meaning: card.meaning })
+    });
+
+    if (!response.ok) throw new Error('Failed to generate');
+
+    const data = await response.json();
+    currentBlankData = {
+      sentence: data.sentence,
+      hint: data.hint,
+      answer: data.answer || card.phrase,
+      hintLevel: 0
+    };
+
+    const wordCount = currentBlankData.answer.trim().split(/\s+/).length;
+    const safeSentence = escapeHtml(data.sentence || '');
+    const safeHint = escapeHtml(data.hint || '');
+    sentenceEl.innerHTML = safeSentence.replace(/_____/g, '<span class="blank-slot">_____</span>')
+      + `<div class="blank-word-count">${wordCount} word${wordCount !== 1 ? 's' : ''}</div>`;
+    hintEl.innerHTML = `<span class="blank-hint-label">Meaning clue</span>${safeHint}`;
+    inputEl.disabled = false;
+    submitBtn.disabled = false;
+    inputEl.focus();
+  } catch (err) {
+    sentenceEl.textContent = 'Failed to generate sentence. Try again.';
+    showToast('Error generating blank: ' + err.message);
+  } finally {
+    sentenceEl.style.opacity = '1';
+  }
+}
+
+async function submitBlankAnswer() {
+  const userAnswer = document.getElementById('blank-answer').value.trim();
+  if (!currentBlankData) return;
+
+  // If blank, user gave up — reveal the answer directly
+  if (!userAnswer) {
+    const card = reviewQueue[reviewIndex];
+    const fb = document.getElementById('llm-feedback');
+    fb.className = 'llm-feedback visible incorrect';
+    document.getElementById('feedback-label').textContent = 'The answer was:';
+    document.getElementById('feedback-your-answer').textContent = currentBlankData.answer;
+    document.getElementById('feedback-verdict').textContent = '';
+    document.getElementById('feedback-explanation').textContent = '';
+
+    document.getElementById('fill-blank-section').classList.remove('visible');
+    document.getElementById('flashcard').style.display = '';
+    document.getElementById('review-card-actions').style.display = '';
+    document.getElementById('card-phrase').style.display = '';
+    document.getElementById('card-category').style.display = '';
+    answerRevealed = true;
+    document.getElementById('card-meaning').style.display = 'block';
+    document.getElementById('card-example').style.display = 'block';
+    document.getElementById('card-divider').style.display = 'block';
+    document.getElementById('btn-regen-example').style.display = 'inline-block';
+    document.getElementById('answer-section').classList.add('visible');
+    if (card.source) document.getElementById('card-source').style.display = 'block';
+    if (!card.example) fetchExample(card);
+    return;
+  }
+
+  const card = reviewQueue[reviewIndex];
+  const btn = document.getElementById('submit-blank-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span>Checking...';
+
+  try {
+    const response = await fetch('/api/evaluate-blank', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phrase: card.phrase,
+        meaning: card.meaning,
+        sentence: currentBlankData.sentence,
+        userAnswer
+      })
+    });
+
+    if (!response.ok) throw new Error('Evaluation failed');
+
+    const result = await response.json();
+
+    // Show feedback using the shared LLM feedback panel
+    const fb = document.getElementById('llm-feedback');
+    fb.className = 'llm-feedback visible ' + result.verdict;
+    document.getElementById('feedback-label').textContent = 'Your answer:';
+    document.getElementById('feedback-your-answer').textContent = userAnswer;
+    document.getElementById('feedback-verdict').textContent =
+      result.verdict === 'correct' ? 'Correct!' :
+      result.verdict === 'partial' ? 'Close!' : 'Not quite';
+    document.getElementById('feedback-explanation').textContent = result.explanation;
+
+    // Hide fill-blank section, reveal the card
+    document.getElementById('fill-blank-section').classList.remove('visible');
+    document.getElementById('flashcard').style.display = '';
+    document.getElementById('review-card-actions').style.display = '';
+    document.getElementById('card-phrase').style.display = '';
+    document.getElementById('card-category').style.display = '';
+    answerRevealed = true;
+    document.getElementById('card-meaning').style.display = 'block';
+    document.getElementById('card-example').style.display = 'block';
+    document.getElementById('card-divider').style.display = 'block';
+    document.getElementById('btn-regen-example').style.display = 'inline-block';
+    document.getElementById('answer-section').classList.add('visible');
+    if (card.source) document.getElementById('card-source').style.display = 'block';
+
+    // Generate example on-the-fly if missing
+    if (!card.example) {
+      fetchExample(card);
+    }
+
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Check Answer';
+  }
+}
+
+async function getBlankHint() {
+  if (!currentBlankData) return;
+
+  const card = reviewQueue[reviewIndex];
+  const nextLevel = (currentBlankData.hintLevel || 0) + 1;
+  const maxLevel = currentBlankData.maxLevel || 3;
+
+  if (nextLevel > maxLevel) return;
+
+  const btn = document.getElementById('btn-hint');
+  btn.disabled = true;
+
+  try {
+    const response = await fetch('/api/blank-hint', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phrase: card.phrase, hintLevel: nextLevel, category: card.category })
+    });
+
+    if (!response.ok) throw new Error('Failed');
+
+    const data = await response.json();
+    currentBlankData.hintLevel = data.level;
+    if (data.maxLevel) currentBlankData.maxLevel = data.maxLevel;
+
+    const hintEl = document.getElementById('hint-display');
+    hintEl.textContent = data.hint;
+    hintEl.classList.add('visible');
+
+    if (data.level >= (data.maxLevel || 3)) {
+      btn.disabled = true;
+      btn.textContent = 'No more hints';
+    } else {
+      btn.disabled = false;
+    }
+  } catch {
+    showToast('Failed to get hint');
+    btn.disabled = false;
+  }
+}
+
+function deleteCurrentCard() {
+  const card = reviewQueue[reviewIndex];
+  if (!card) return;
+  if (!confirm(`Delete "${card.phrase}"?`)) return;
+
+  // Remove from main cards array
+  cards = cards.filter(c => c.id !== card.id);
+  saveCards(cards);
+
+  // Remove from review queue
+  reviewQueue.splice(reviewIndex, 1);
+
+  showToast('Card deleted');
+
+  // If no more cards, show summary
+  if (reviewQueue.length === 0 || reviewIndex >= reviewQueue.length) {
+    showSummary();
+  } else {
+    showCurrentCard();
+  }
+}
+
+function editCurrentCard() {
+  const card = reviewQueue[reviewIndex];
+  if (!card) return;
+
+  // Navigate to edit screen with a flag to return to review
+  editingCardId = card.id;
+  document.getElementById('form-title').textContent = 'Edit Card';
+  document.getElementById('input-phrase').value = card.phrase;
+  document.getElementById('input-meaning').value = card.meaning;
+  document.getElementById('input-example').value = card.example;
+  document.getElementById('input-category').value = card.category;
+  document.getElementById('input-bucket').value = card.bucket || '';
+  document.getElementById('delete-card-btn').style.display = 'block';
+
+  // Set a flag so we return to review after saving
+  editingFromReview = true;
+  showScreen('add-edit');
+}
+
+function rateCard(quality) {
+  const card = reviewQueue[reviewIndex];
+
+  if (quality === -1) {
+    // Not Useful — skip from future reviews
+    card.bucket = 'skip';
+    const idx = cards.findIndex(c => c.id === card.id);
+    if (idx !== -1) cards[idx] = card;
+    saveCards(cards);
+    sessionStats.reviewed++;
+    reviewIndex++;
+    showCurrentCard();
+    return;
+  }
+
+  const updates = sm2(card, quality);
+
+  // Store bucket based on rating
+  if (quality === 0) updates.bucket = 'nope';
+  else if (quality === 3) updates.bucket = 'kinda';
+  else updates.bucket = 'nailed';
+
+  // Apply updates to card
+  Object.assign(card, updates);
+
+  // Update in main cards array
+  const idx = cards.findIndex(c => c.id === card.id);
+  if (idx !== -1) cards[idx] = card;
+  saveCards(cards);
+
+  sessionStats.reviewed++;
+  if (quality >= 4) sessionStats.goodOrBetter++;
+
+  reviewIndex++;
+  showCurrentCard();
+}
+
+function endReview() {
+  if (sessionStats.reviewed > 0) {
+    showSummary();
+  } else {
+    showScreen('dashboard');
+  }
+}
+
+function showSummary() {
+  document.getElementById('summary-reviewed').textContent = sessionStats.reviewed;
+  const pct = sessionStats.reviewed > 0
+    ? Math.round((sessionStats.goodOrBetter / sessionStats.reviewed) * 100)
+    : 0;
+  document.getElementById('summary-accuracy').textContent = pct + '%';
+
+  // Update progress bar to 100%
+  document.getElementById('review-progress-bar').style.width = '100%';
+
+  showScreen('summary');
+}
+
+// ─── Browse ─────────────────────────────────────────────────────────────
+
+let activeFilter = 'all';
+let activeBucket = null; // null = no bucket filter, or specific bucket including 'new'
+
+function setFilter(filter) {
+  activeFilter = filter;
+  document.querySelectorAll('.filter-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.filter === filter);
+  });
+  renderBrowseList();
+}
+
+function showBucket(bucket) {
+  const labels = { nope: 'Nope', kinda: 'Kinda', nailed: 'Nailed it', skip: 'Not Useful', new: 'New' };
+  activeBucket = bucket;
+  showScreen('browse');
+  document.getElementById('browse-title').textContent = labels[bucket] || 'Browse';
+  document.getElementById('search-input').value = '';
+  renderBrowseList();
+}
+
+function renderBrowseList() {
+  const query = document.getElementById('search-input').value.toLowerCase();
+  const list = document.getElementById('card-list');
+  const today = getToday();
+
+  let filtered = cards;
+  if (activeBucket) {
+    if (activeBucket === 'new') filtered = filtered.filter(c => !c.bucket);
+    else filtered = filtered.filter(c => c.bucket === activeBucket);
+  }
+  if (activeFilter !== 'all') {
+    filtered = filtered.filter(c => c.category === activeFilter);
+  }
+  if (query) {
+    filtered = filtered.filter(c =>
+      c.phrase.toLowerCase().includes(query) ||
+      c.meaning.toLowerCase().includes(query)
+    );
+  }
+
+  // Sort: due first, then by next review date
+  filtered.sort((a, b) => {
+    const aDue = a.nextReview <= today ? 0 : 1;
+    const bDue = b.nextReview <= today ? 0 : 1;
+    if (aDue !== bDue) return aDue - bDue;
+    return a.nextReview.localeCompare(b.nextReview);
+  });
+
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="empty-state">No cards found</div>';
+    return;
+  }
+
+  list.innerHTML = filtered.map(card => {
+    let statusClass, statusText;
+    if (card.interval >= 21) {
+      statusClass = 'status-mastered';
+      statusText = 'Mastered';
+    } else if (card.nextReview <= today) {
+      statusClass = 'status-due';
+      statusText = 'Due';
+    } else {
+      statusClass = 'status-learning';
+      statusText = 'In ' + formatInterval(Math.max(1, Math.ceil((new Date(card.nextReview) - new Date(today)) / 86400000)));
+    }
+
+    return `
+      <div class="card-item" onclick="editCard('${card.id}')">
+        <div>
+          <div class="card-phrase">${escapeHtml(card.phrase)}</div>
+          <div class="card-meta">${card.category} · ${escapeHtml(card.meaning.slice(0, 50))}${card.meaning.length > 50 ? '...' : ''}</div>
+          ${card.source ? `<div class="card-source">${escapeHtml(card.source)}</div>` : ''}
+        </div>
+        <span class="card-status ${statusClass}">${statusText}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+// ─── Add / Edit ─────────────────────────────────────────────────────────
+
+let editingCardId = null;
+let editingFromReview = false;
+
+function showAddForm() {
+  editingCardId = null;
+  editingFromReview = false;
+  document.getElementById('form-title').textContent = 'Add Card';
+  document.getElementById('input-phrase').value = '';
+  document.getElementById('input-meaning').value = '';
+  document.getElementById('input-example').value = '';
+  document.getElementById('input-category').value = 'idiom';
+  document.getElementById('input-bucket').value = '';
+  document.getElementById('delete-card-btn').style.display = 'none';
+  showScreen('add-edit');
+}
+
+function editCard(id) {
+  const card = cards.find(c => c.id === id);
+  if (!card) return;
+
+  editingCardId = id;
+  editingFromReview = false;
+  document.getElementById('form-title').textContent = 'Edit Card';
+  document.getElementById('input-phrase').value = card.phrase;
+  document.getElementById('input-meaning').value = card.meaning;
+  document.getElementById('input-example').value = card.example;
+  document.getElementById('input-category').value = card.category;
+  document.getElementById('input-bucket').value = card.bucket || '';
+  document.getElementById('delete-card-btn').style.display = 'block';
+  showScreen('add-edit');
+}
+
+function saveCard() {
+  const phrase = document.getElementById('input-phrase').value.trim();
+  const meaning = document.getElementById('input-meaning').value.trim();
+  const example = document.getElementById('input-example').value.trim();
+  const category = document.getElementById('input-category').value;
+  const bucket = document.getElementById('input-bucket').value;
+
+  if (!phrase || !meaning) {
+    showToast('Phrase and meaning are required');
+    return;
+  }
+
+  if (editingCardId) {
+    const idx = cards.findIndex(c => c.id === editingCardId);
+    if (idx !== -1) {
+      cards[idx].phrase = phrase;
+      cards[idx].meaning = meaning;
+      cards[idx].example = example;
+      cards[idx].category = category;
+      if (bucket) cards[idx].bucket = bucket;
+      else delete cards[idx].bucket;
+    }
+    // Also update the review queue copy if editing from review
+    if (editingFromReview) {
+      const rIdx = reviewQueue.findIndex(c => c.id === editingCardId);
+      if (rIdx !== -1) {
+        reviewQueue[rIdx].phrase = phrase;
+        reviewQueue[rIdx].meaning = meaning;
+        reviewQueue[rIdx].example = example;
+        reviewQueue[rIdx].category = category;
+        if (bucket) reviewQueue[rIdx].bucket = bucket;
+        else delete reviewQueue[rIdx].bucket;
+      }
+    }
+    showToast('Card updated');
+  } else {
+    cards.push({
+      id: generateId(),
+      phrase, meaning, example, category,
+      bucket: bucket || undefined,
+      source: 'Manual',
+      easeFactor: 2.5,
+      interval: 0,
+      repetitions: 0,
+      nextReview: getToday(),
+      lastReview: null
+    });
+    showToast('Card added');
+  }
+
+  saveCards(cards);
+
+  if (editingFromReview) {
+    editingFromReview = false;
+    showScreen('review');
+    showCurrentCard();
+  } else {
+    showScreen('browse');
+  }
+}
+
+function deleteCard() {
+  if (!editingCardId) return;
+  if (!confirm('Delete this card?')) return;
+
+  cards = cards.filter(c => c.id !== editingCardId);
+  saveCards(cards);
+  editingCardId = null;
+  showToast('Card deleted');
+  showScreen('browse');
+}
+
+function cancelEdit() {
+  if (editingFromReview) {
+    editingFromReview = false;
+    showScreen('review');
+    showCurrentCard();
+  } else {
+    showScreen(editingCardId ? 'browse' : 'dashboard');
+  }
+}
+
+// ─── Import ─────────────────────────────────────────────────────────────
+
+function importJSON() {
+  const raw = document.getElementById('import-json').value.trim();
+  if (!raw) { showToast('Paste JSON data first'); return; }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    showToast('Invalid JSON format');
+    return;
+  }
+
+  if (!Array.isArray(data)) {
+    showToast('Expected a JSON array');
+    return;
+  }
+
+  let added = 0;
+  const today = getToday();
+  for (const item of data) {
+    if (!item.phrase) continue;
+    cards.push({
+      id: generateId(),
+      phrase: item.phrase,
+      meaning: item.meaning || '',
+      example: item.example || '',
+      category: item.category || 'idiom',
+      source: item.source || 'JSON Import',
+      easeFactor: 2.5,
+      interval: 0,
+      repetitions: 0,
+      nextReview: today,
+      lastReview: null
+    });
+    added++;
+  }
+
+  saveCards(cards);
+  document.getElementById('import-json').value = '';
+  showToast(`Imported ${added} card${added !== 1 ? 's' : ''}`);
+  renderBrowseList();
+}
+
+// ─── Notion Import ──────────────────────────────────────────────────────
+
+async function importFromNotion() {
+  const btn = document.getElementById('import-notion-btn');
+  btn.disabled = true;
+  btn.textContent = 'Syncing with Notion...';
+
+  try {
+    // Try live sync first (fetches fresh data from Notion API)
+    let notionCards;
+    let source = 'Notion';
+
+    try {
+      const syncResponse = await fetch('/api/sync-notion', { method: 'POST' });
+      const syncData = await syncResponse.json();
+
+      if (syncResponse.ok && syncData.cards) {
+        notionCards = syncData.cards;
+        source = 'Notion (live sync)';
+      } else if (syncData.error && syncData.error.includes('NOTION_TOKEN')) {
+        // No token configured — fall back to static file
+        btn.textContent = 'Importing from cache...';
+        const fallbackResponse = await fetch('/api/notion-cards');
+        if (!fallbackResponse.ok) {
+          const fbData = await fallbackResponse.json().catch(() => ({}));
+          throw new Error(fbData.error || 'Failed to load Notion cards');
+        }
+        notionCards = await fallbackResponse.json();
+        source = 'cached file';
+      } else {
+        throw new Error(syncData.error || 'Sync failed');
+      }
+    } catch (syncErr) {
+      // If sync endpoint doesn't exist or network error, try static file
+      if (syncErr.message.includes('Failed to fetch') || syncErr.message.includes('NetworkError')) {
+        btn.textContent = 'Importing from cache...';
+        const fallbackResponse = await fetch('/api/notion-cards');
+        if (!fallbackResponse.ok) {
+          const fbData = await fallbackResponse.json().catch(() => ({}));
+          throw new Error(fbData.error || 'Failed to load Notion cards');
+        }
+        notionCards = await fallbackResponse.json();
+        source = 'cached file';
+      } else {
+        throw syncErr;
+      }
+    }
+
+    if (!Array.isArray(notionCards) || notionCards.length === 0) {
+      showToast('No cards found');
+      return;
+    }
+
+    // Build a set of existing phrases (lowercase) for dedup
+    const existingPhrases = new Set(cards.map(c => c.phrase.toLowerCase()));
+    const today = getToday();
+
+    let added = 0;
+    let skipped = 0;
+
+    for (const item of notionCards) {
+      if (!item.phrase) continue;
+
+      const key = item.phrase.toLowerCase();
+      if (existingPhrases.has(key)) {
+        skipped++;
+        continue;
+      }
+
+      existingPhrases.add(key);
+      cards.push({
+        id: generateId(),
+        phrase: item.phrase,
+        meaning: item.meaning || '',
+        example: item.example || '',
+        category: item.category || 'idiom',
+        source: item.source || 'Notion',
+        easeFactor: 2.5,
+        interval: 0,
+        repetitions: 0,
+        nextReview: today,
+        lastReview: null
+      });
+      added++;
+    }
+
+    saveCards(cards);
+    updateDashboard();
+
+    let msg = `Imported ${added} card${added !== 1 ? 's' : ''} from ${source}`;
+    if (skipped > 0) msg += ` (${skipped} duplicates skipped)`;
+    showToast(msg);
+
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sync from Notion';
+  }
+}
+
+// ─── Apple Notes Import ─────────────────────────────────────────────────
+
+async function importFromAppleNotes() {
+  const btn = document.getElementById('import-apple-btn');
+  btn.disabled = true;
+  btn.textContent = 'Importing Apple Notes...';
+
+  try {
+    let appleCards;
+    let source = 'Apple Notes';
+
+    // Use cached file first (fast), fall back to live sync if no cache
+    const cacheResponse = await fetch('/api/apple-cards');
+    if (cacheResponse.ok) {
+      appleCards = await cacheResponse.json();
+      source = 'Apple Notes';
+    } else {
+      // No cache — do live sync (takes ~2 min)
+      btn.textContent = 'Syncing Apple Notes (~2 min)...';
+      const syncResponse = await fetch('/api/sync-apple', { method: 'POST' });
+      const syncData = await syncResponse.json();
+      if (syncResponse.ok && syncData.cards) {
+        appleCards = syncData.cards;
+        source = 'Apple Notes (live sync)';
+      } else {
+        throw new Error(syncData.error || 'Sync failed');
+      }
+    }
+
+    if (!Array.isArray(appleCards) || appleCards.length === 0) {
+      showToast('No cards found');
+      return;
+    }
+
+    const existingPhrases = new Set(cards.map(c => c.phrase.toLowerCase()));
+    const today = getToday();
+
+    let added = 0;
+    let skipped = 0;
+
+    for (const item of appleCards) {
+      if (!item.phrase) continue;
+
+      const key = item.phrase.toLowerCase();
+      if (existingPhrases.has(key)) {
+        skipped++;
+        continue;
+      }
+
+      existingPhrases.add(key);
+      cards.push({
+        id: generateId(),
+        phrase: item.phrase,
+        meaning: item.meaning || '',
+        example: item.example || '',
+        category: item.category || 'idiom',
+        source: item.source || 'Apple Notes',
+        easeFactor: 2.5,
+        interval: 0,
+        repetitions: 0,
+        nextReview: today,
+        lastReview: null
+      });
+      added++;
+    }
+
+    saveCards(cards);
+    updateDashboard();
+
+    let msg = `Imported ${added} card${added !== 1 ? 's' : ''} from ${source}`;
+    if (skipped > 0) msg += ` (${skipped} duplicates skipped)`;
+    showToast(msg);
+
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Import from Apple Notes';
+  }
+}
+
+// ─── On-the-fly Example Generation ─────────────────────────────────────
+
+async function fetchExample(card) {
+  if (card.example) return; // already has one
+
+  const exEl = document.getElementById('card-example');
+  exEl.textContent = 'Generating example...';
+  exEl.style.opacity = '0.5';
+
+  try {
+    const response = await fetch('/api/generate-example', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phrase: card.phrase, meaning: card.meaning })
+    });
+
+    if (!response.ok) throw new Error('Failed');
+
+    const data = await response.json();
+    if (data.example) {
+      card.example = data.example;
+      exEl.textContent = `"${data.example}"`;
+
+      // Save to localStorage so we don't re-fetch
+      const idx = cards.findIndex(c => c.id === card.id);
+      if (idx !== -1) cards[idx].example = data.example;
+      saveCards(cards);
+    }
+  } catch {
+    exEl.textContent = '';
+  } finally {
+    exEl.style.opacity = '1';
+  }
+}
+
+// ─── LLM Evaluation (via backend) ───────────────────────────────────────
+
+async function evaluateAnswer(phrase, correctMeaning, userAnswer) {
+  const response = await fetch('/api/evaluate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phrase, meaning: correctMeaning, userAnswer })
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `Server error: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+// ─── Typed Answer Flow ──────────────────────────────────────────────────
+
+function showTypeAnswer() {
+  document.getElementById('type-answer-section').classList.add('visible');
+  document.getElementById('typed-answer').value = '';
+  document.getElementById('typed-answer').focus();
+}
+
+async function submitTypedAnswer() {
+  const userAnswer = document.getElementById('typed-answer').value.trim();
+  if (!userAnswer) {
+    showToast('Type your answer first');
+    return;
+  }
+
+  const card = reviewQueue[reviewIndex];
+  const btn = document.getElementById('submit-answer-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span>Checking...';
+
+  try {
+    const result = await evaluateAnswer(card.phrase, card.meaning, userAnswer);
+
+    // Show feedback
+    const fb = document.getElementById('llm-feedback');
+    fb.className = 'llm-feedback visible ' + result.verdict;
+    document.getElementById('feedback-label').textContent = 'Your sentence:';
+    document.getElementById('feedback-your-answer').textContent = userAnswer;
+    document.getElementById('feedback-verdict').textContent =
+      result.verdict === 'correct' ? 'Correct!' :
+      result.verdict === 'partial' ? 'Partially correct' : 'Not quite';
+    document.getElementById('feedback-explanation').textContent = result.explanation;
+
+    // Hide type section, reveal the actual answer on the card
+    document.getElementById('type-answer-section').classList.remove('visible');
+    answerRevealed = true;
+    document.getElementById('card-meaning').style.display = 'block';
+    document.getElementById('card-example').style.display = 'block';
+    document.getElementById('card-divider').style.display = 'block';
+    document.getElementById('btn-regen-example').style.display = 'inline-block';
+    document.getElementById('answer-section').classList.add('visible');
+    if (card.source) document.getElementById('card-source').style.display = 'block';
+
+    // Generate example on-the-fly if missing
+    if (!card.example) {
+      fetchExample(card);
+    }
+
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Check My Answer';
+  }
+}
+
+// ─── Utilities ──────────────────────────────────────────────────────────
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ─── Keyboard shortcuts ─────────────────────────────────────────────────
+
+document.addEventListener('keydown', (e) => {
+  // Only active during review
+  if (!document.getElementById('review').classList.contains('active')) return;
+
+  // Handle Enter key in textareas/inputs for submission
+  if (document.activeElement && document.activeElement.id === 'typed-answer') {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submitTypedAnswer();
+    }
+    return;
+  }
+  if (document.activeElement && document.activeElement.id === 'blank-answer') {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitBlankAnswer();
+    }
+    return;
+  }
+
+  if (!answerRevealed) {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      revealAnswer();
+    }
+  } else {
+    if (e.key === '1') rateCard(0); // Again
+    if (e.key === '2') rateCard(3); // Hard
+    if (e.key === '3') rateCard(4); // Good
+    if (e.key === '4') rateCard(5); // Easy
+  }
+});
+
+// ─── Init ───────────────────────────────────────────────────────────────
+
+// Startup bootstrap:
+// 1) Always merge cached Notion/Apple JSON cards into local deck (dedup by phrase)
+// 2) Backfill missing source field on existing cards
+(async function bootstrapCardsFromCachedSources() {
+  let notionRes = [];
+  let appleRes = [];
+
+  try {
+    [notionRes, appleRes] = await Promise.all([
+      fetch('/api/notion-cards').then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch('/api/apple-cards').then(r => r.ok ? r.json() : []).catch(() => [])
+    ]);
+  } catch {}
+
+  const existingPhrases = new Set(cards.map(c => (c.phrase || '').toLowerCase()));
+  const sourceLookup = new Map(); // phrase (lowercase) -> source
+  const today = getToday();
+
+  for (const c of notionRes) {
+    if (c && c.phrase) sourceLookup.set(c.phrase.toLowerCase(), c.source || 'Notion — Word List');
+  }
+  for (const c of appleRes) {
+    if (c && c.phrase && !sourceLookup.has(c.phrase.toLowerCase())) {
+      sourceLookup.set(c.phrase.toLowerCase(), c.source || 'Apple Notes');
+    }
+  }
+
+  let added = 0;
+  const addImportedCards = (items, fallbackSource) => {
+    for (const item of items) {
+      if (!item || !item.phrase) continue;
+      const phrase = item.phrase.trim();
+      if (!phrase) continue;
+
+      const key = phrase.toLowerCase();
+      if (existingPhrases.has(key)) continue;
+      existingPhrases.add(key);
+
+      cards.push({
+        id: generateId(),
+        phrase,
+        meaning: item.meaning || '',
+        example: item.example || '',
+        category: item.category || 'idiom',
+        source: item.source || fallbackSource,
+        easeFactor: 2.5,
+        interval: 0,
+        repetitions: 0,
+        nextReview: today,
+        lastReview: null
+      });
+      added++;
+    }
+  };
+
+  addImportedCards(notionRes, 'Notion');
+  addImportedCards(appleRes, 'Apple Notes');
+
+  // Backfill missing source values
+  const samplePhrases = new Set(SAMPLE_DATA.map(d => d.phrase.toLowerCase()));
+  let updated = 0;
+  for (const card of cards) {
+    if (card.source) continue;
+    const key = (card.phrase || '').toLowerCase();
+    if (samplePhrases.has(key)) {
+      card.source = 'Sample';
+      updated++;
+    } else if (sourceLookup.has(key)) {
+      card.source = sourceLookup.get(key);
+      updated++;
+    }
+  }
+
+  if (added > 0 || updated > 0) {
+    saveCards(cards);
+    updateDashboard();
+    if (document.getElementById('browse').classList.contains('active')) {
+      renderBrowseList();
+    }
+    console.log(`Bootstrap complete: ${added} imported, ${updated} source fields updated`);
+  }
+})();
+
+updateDashboard();
+</script>
+</body>
+</html>
