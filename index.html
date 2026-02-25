@@ -920,6 +920,13 @@ textarea { resize: vertical; min-height: 80px; }
 
 const STORAGE_KEY = 'idiom-quiz-cards';
 const DAILY_SESSION_KEY = 'idiom-quiz-daily-session';
+const CARDS_API_ENDPOINT = '/api/cards';
+const SERVER_SYNC_DEBOUNCE_MS = 350;
+
+let serverSyncReady = false;
+let serverSyncTimer = null;
+let serverSyncInFlight = false;
+let serverSyncQueued = false;
 
 const SAMPLE_DATA = [
   { phrase: "Bite the bullet", meaning: "To endure a painful or difficult situation courageously", example: "I hate going to the dentist, but I'll just have to bite the bullet.", category: "idiom" },
@@ -952,26 +959,40 @@ function getToday() {
   return new Date().toISOString().split('T')[0];
 }
 
+function normalizeCardsForApp(rawCards) {
+  if (!Array.isArray(rawCards)) return { cards: [], touched: false };
+  const today = getToday();
+  let touched = false;
+  const normalized = rawCards
+    .filter(card => card && typeof card === 'object')
+    .map(card => ({ ...card }));
+
+  for (const card of normalized) {
+    if (!card.createdAt) {
+      card.createdAt = today;
+      touched = true;
+    }
+    if (card.bucket && !card.bucketUpdatedAt) {
+      card.bucketUpdatedAt = card.lastReview || today;
+      touched = true;
+    }
+  }
+
+  return { cards: normalized, touched };
+}
+
 function loadCards() {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored) {
-    const parsed = JSON.parse(stored);
-    const today = getToday();
-    let touched = false;
-
-    for (const card of parsed) {
-      if (!card.createdAt) {
-        card.createdAt = today;
-        touched = true;
+    try {
+      const normalized = normalizeCardsForApp(JSON.parse(stored));
+      if (normalized.touched) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized.cards));
       }
-      if (card.bucket && !card.bucketUpdatedAt) {
-        card.bucketUpdatedAt = card.lastReview || today;
-        touched = true;
-      }
+      return normalized.cards;
+    } catch {
+      // Ignore malformed local cache and reseed below.
     }
-
-    if (touched) localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-    return parsed;
   }
 
   // First launch — seed with sample data
@@ -990,12 +1011,89 @@ function loadCards() {
     nextReview: today,
     lastReview: null
   }));
-  saveCards(cards);
+  saveCards(cards, { skipServer: true });
   return cards;
 }
 
-function saveCards(cards) {
+function saveCards(cards, options = {}) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
+  if (!options.skipServer) {
+    scheduleServerCardSync();
+  }
+}
+
+async function fetchCardsFromServer() {
+  const response = await fetch(CARDS_API_ENDPOINT, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Failed to load cards (${response.status})`);
+  }
+
+  const data = await response.json();
+  const normalized = normalizeCardsForApp(data.cards);
+  return normalized.cards;
+}
+
+async function pushCardsToServer(cardsToSave) {
+  const response = await fetch(CARDS_API_ENDPOINT, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cards: cardsToSave })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to save cards (${response.status})`);
+  }
+}
+
+function scheduleServerCardSync() {
+  if (!serverSyncReady) return;
+
+  if (serverSyncTimer) {
+    clearTimeout(serverSyncTimer);
+  }
+  serverSyncTimer = setTimeout(() => {
+    serverSyncTimer = null;
+    void flushServerCardSync();
+  }, SERVER_SYNC_DEBOUNCE_MS);
+}
+
+async function flushServerCardSync() {
+  if (!serverSyncReady) return;
+
+  if (serverSyncInFlight) {
+    serverSyncQueued = true;
+    return;
+  }
+
+  serverSyncInFlight = true;
+  try {
+    const snapshot = cards.map(card => ({ ...card }));
+    await pushCardsToServer(snapshot);
+  } catch (err) {
+    console.warn('Card sync failed:', err.message);
+  } finally {
+    serverSyncInFlight = false;
+    if (serverSyncQueued) {
+      serverSyncQueued = false;
+      void flushServerCardSync();
+    }
+  }
+}
+
+async function syncCardsWithServerOnStartup() {
+  try {
+    const remoteCards = await fetchCardsFromServer();
+    if (remoteCards.length > 0) {
+      cards = remoteCards;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
+    } else if (cards.length > 0) {
+      await pushCardsToServer(cards);
+    }
+  } catch (err) {
+    console.warn('Using local cards (server sync unavailable):', err.message);
+  } finally {
+    serverSyncReady = true;
+  }
 }
 
 let cards = loadCards();
@@ -1468,7 +1566,7 @@ function showCurrentCard() {
     const dailySession = getTodayDailySession();
     const total = Math.max(1, dailySession?.target || reviewQueue.length);
     const completed = (dailySession?.completedIds || []).length;
-    const current = Math.min(total, completed + reviewIndex + 1);
+    const current = Math.min(total, completed + 1);
     document.getElementById('review-progress-text').textContent = `${current} / ${total}`;
     document.getElementById('review-progress-bar').style.width = `${((current - 1) / total) * 100}%`;
   } else {
@@ -2475,7 +2573,7 @@ document.addEventListener('keydown', (e) => {
 // Startup bootstrap:
 // 1) Always merge cached Notion/Apple JSON cards into local deck (dedup by phrase)
 // 2) Backfill missing source field on existing cards
-(async function bootstrapCardsFromCachedSources() {
+async function bootstrapCardsFromCachedSources() {
   let notionRes = [];
   let appleRes = [];
 
@@ -2565,9 +2663,13 @@ document.addEventListener('keydown', (e) => {
     }
     console.log(`Bootstrap complete: ${added} imported, ${updated} source fields updated`);
   }
-})();
+}
 
-updateDashboard();
+(async function initApp() {
+  await syncCardsWithServerOnStartup();
+  await bootstrapCardsFromCachedSources();
+  updateDashboard();
+})();
 </script>
 </body>
 </html>

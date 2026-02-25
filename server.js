@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { DatabaseSync } = require('node:sqlite');
 
 // Load .env
 const envPath = path.join(__dirname, '.env');
@@ -22,6 +23,7 @@ const { syncFromAppleNotes } = require('./apple-notes-sync');
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
+const DB_PATH = path.join(__dirname, 'idiom-quiz.db');
 
 // Notion page IDs to sync (Word List + subpages)
 const NOTION_PAGE_IDS = (process.env.NOTION_PAGE_IDS || '6c5f0587-e35c-4c01-9b38-c42ba9f4a230').split(',').map(s => s.trim());
@@ -38,10 +40,27 @@ if (!NOTION_TOKEN) {
   console.warn('WARNING: NOTION_TOKEN not set. Live Notion sync will be unavailable. Add it to .env file.');
 }
 
+const db = new DatabaseSync(DB_PATH);
+db.exec(`
+CREATE TABLE IF NOT EXISTS app_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`);
+const selectAppStateStmt = db.prepare('SELECT value FROM app_state WHERE key = ?');
+const upsertAppStateStmt = db.prepare(`
+INSERT INTO app_state (key, value, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(key) DO UPDATE SET
+  value = excluded.value,
+  updated_at = excluded.updated_at
+`);
+
 const server = http.createServer(async (req, res) => {
   // CORS headers (for local dev)
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -94,6 +113,46 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', hasApiKey: !!OPENAI_API_KEY, hasNotionToken: !!NOTION_TOKEN }));
+    return;
+  }
+
+  // Persistent deck storage (SQLite)
+  if (req.method === 'GET' && req.url === '/api/cards') {
+    try {
+      const cards = loadCardsFromDb();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ cards }));
+    } catch (err) {
+      console.error('Load cards error:', err.message);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (req.method === 'PUT' && req.url === '/api/cards') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const parsed = JSON.parse(body || '{}');
+        if (!Array.isArray(parsed.cards)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing required field: cards (array)' }));
+          return;
+        }
+
+        const cards = sanitizeCards(parsed.cards);
+        saveCardsToDb(cards);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, count: cards.length }));
+      } catch (err) {
+        console.error('Save cards error:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
     return;
   }
 
@@ -863,6 +922,26 @@ Only output valid JSON, nothing else.`
     apiReq.write(payload);
     apiReq.end();
   });
+}
+
+function loadCardsFromDb() {
+  const row = selectAppStateStmt.get('cards');
+  if (!row || !row.value) return [];
+
+  const parsed = JSON.parse(row.value);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function sanitizeCards(cards) {
+  return cards
+    .filter(card => card && typeof card === 'object')
+    .map(card => ({ ...card }))
+    .filter(card => typeof card.phrase === 'string' && card.phrase.trim().length > 0)
+    .map(card => ({ ...card, phrase: card.phrase.trim() }));
+}
+
+function saveCardsToDb(cards) {
+  upsertAppStateStmt.run('cards', JSON.stringify(cards), new Date().toISOString());
 }
 
 server.listen(PORT, () => {
