@@ -232,14 +232,20 @@ const server = http.createServer(async (req, res) => {
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        const { phrase, meaning, sentence, userAnswer } = JSON.parse(body);
+        const { phrase, meaning, sentence, expectedAnswer, userAnswer } = JSON.parse(body);
         if (!phrase || !userAnswer) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing required fields' }));
           return;
         }
 
-        const result = await evaluateBlankAnswer(phrase, meaning || '', sentence || '', userAnswer);
+        const result = await evaluateBlankAnswer(
+          phrase,
+          meaning || '',
+          sentence || '',
+          expectedAnswer || phrase,
+          userAnswer
+        );
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       } catch (err) {
@@ -408,13 +414,23 @@ async function generateBlankSentence(phrase, meaning) {
     messages: [
       {
         role: 'system',
-        content: `You create fill-in-the-blank exercises for English vocabulary learning. Given a phrase/word and its meaning, generate:
-1. A natural sentence that uses the phrase, with the phrase replaced by "_____"
-2. A short hint describing the intention or meaning the speaker wants to convey (not the phrase itself, but what they're trying to express)
+        content: `You create fill-in-the-blank exercises for English vocabulary learning.
+
+Given a phrase and meaning, generate:
+1. A natural sentence using the exact phrase in context (do not change phrase wording)
+2. The exact missing answer text to blank from that phrase
+3. A short meaning/intention hint
+
+Rules for choosing what to blank:
+- For multi-word phrases, usually blank only the key content word(s), not all words
+- Never blank only function words (e.g. "the", "a", "and", "in", "on", "to")
+- Keep it challenging but fair; avoid giveaways where almost the whole phrase is visible
+- The answer must be a contiguous part of the original phrase text
 
 Respond in JSON with exactly these fields:
-- "sentence": the sentence with "_____" where the phrase belongs
-- "hint": a short description of what the speaker is trying to express (e.g. "wanting to say something happens very rarely" for "once in a blue moon")
+- "sentence": full sentence containing the exact phrase (not blanked)
+- "answer": exact text to blank from that phrase
+- "hint": short meaning/intention clue
 
 Only output valid JSON, nothing else.`
       },
@@ -452,8 +468,53 @@ Only output valid JSON, nothing else.`
           const content = parsed.choices[0].message.content.trim();
           const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
           const result = JSON.parse(jsonStr);
-          result.answer = phrase; // The correct answer is always the phrase
-          resolve(result);
+          const fullSentence = (result.sentence || '').trim();
+          let answer = (result.answer || '').trim();
+          const hint = (result.hint || '').trim();
+
+          // If model misses fields or picks low-info answers, fall back to local blanking.
+          const fallback = buildContentWordBlank(phrase);
+          const normalizedAnswer = normalizeToken(answer);
+          const normalizedPhrase = phrase.trim().toLowerCase().replace(/\s+/g, ' ');
+          const normalizedAnswerPhrase = answer.trim().toLowerCase().replace(/\s+/g, ' ');
+          const isWholePhraseForMultiWord =
+            phrase.trim().split(/\s+/).length > 1 &&
+            normalizedAnswerPhrase === normalizedPhrase;
+          const isLowInfoSingleWord =
+            answer.split(/\s+/).length === 1 &&
+            NON_BLANKABLE_FALLBACK.has(normalizedAnswer);
+
+          let blankSpec = null;
+          if (answer && !isLowInfoSingleWord && !isWholePhraseForMultiWord) {
+            blankSpec = buildBlankFromAnswerInPhrase(phrase, answer);
+          }
+
+          if (!blankSpec) {
+            blankSpec = fallback;
+          }
+          answer = blankSpec.answer;
+
+          let sentenceWithBlank = '';
+          if (!fullSentence) {
+            sentenceWithBlank = blankSpec.blankedPhrase;
+          } else if (sentenceContainsPhrase(fullSentence, phrase)) {
+            sentenceWithBlank = replacePhraseInSentence(fullSentence, phrase, blankSpec.blankedPhrase);
+          } else {
+            const replacedByAnswer = replaceTextInSentence(fullSentence, answer, '_____');
+            sentenceWithBlank = replacedByAnswer !== fullSentence
+              ? replacedByAnswer
+              : `${fullSentence} (${blankSpec.blankedPhrase})`;
+          }
+
+          if (!/_____/.test(sentenceWithBlank)) sentenceWithBlank += ' _____';
+
+          const answerCategory = answer.split(/\s+/).length > 1 ? 'phrase' : 'word';
+          resolve({
+            sentence: sentenceWithBlank,
+            hint,
+            answer,
+            answerCategory
+          });
         } catch (e) {
           reject(new Error('Failed to parse OpenAI response'));
         }
@@ -464,6 +525,232 @@ Only output valid JSON, nothing else.`
     apiReq.write(payload);
     apiReq.end();
   });
+}
+
+const FUNCTION_WORDS = new Set([
+  'a', 'an', 'the', 'some', 'any', 'this', 'that', 'these', 'those',
+  'my', 'your', 'his', 'her', 'its', 'our', 'their',
+  'in', 'on', 'at', 'by', 'for', 'from', 'to', 'of', 'with', 'without',
+  'into', 'onto', 'over', 'under', 'as',
+  'and', 'or', 'but', 'if', 'than', 'then', 'so', 'very', 'just',
+  // Light carrier words that often should stay visible in phrase context.
+  'way', 'thing', 'stuff', 'kind', 'sort', 'part', 'point'
+]);
+
+const NON_BLANKABLE_FALLBACK = new Set([
+  'a', 'an', 'the', 'some', 'any', 'this', 'that', 'these', 'those',
+  'my', 'your', 'his', 'her', 'its', 'our', 'their',
+  'in', 'on', 'at', 'by', 'for', 'from', 'to', 'of', 'with', 'without',
+  'into', 'onto', 'over', 'under', 'as',
+  'and', 'or', 'but', 'if', 'than', 'then', 'so'
+]);
+
+function normalizeToken(word) {
+  return (word || '').toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, '');
+}
+
+function pickContentIndexes(words) {
+  const content = [];
+  for (let i = 0; i < words.length; i++) {
+    const normalized = normalizeToken(words[i]);
+    if (!normalized) continue;
+    if (!FUNCTION_WORDS.has(normalized)) {
+      content.push(i);
+    }
+  }
+
+  if (content.length > 0) {
+    // If a token repeats (e.g. "up ... up"), blank only first occurrence.
+    const unique = [];
+    const seen = new Set();
+    for (const idx of content) {
+      const token = normalizeToken(words[idx]);
+      if (seen.has(token)) continue;
+      seen.add(token);
+      unique.push(idx);
+    }
+    return unique;
+  }
+
+  // Fallback: avoid blanking obvious glue words like "the", "and", "in".
+  const candidates = [];
+  for (let i = 0; i < words.length; i++) {
+    const token = normalizeToken(words[i]);
+    if (!token) continue;
+    if (!NON_BLANKABLE_FALLBACK.has(token)) {
+      candidates.push(i);
+    }
+  }
+
+  const pool = candidates.length > 0 ? candidates : words.map((_, i) => i);
+  let longestIdx = 0;
+  let longestLen = 0;
+  for (const i of pool) {
+    const len = normalizeToken(words[i]).length;
+    if (len > longestLen) {
+      longestLen = len;
+      longestIdx = i;
+    }
+  }
+  return [longestIdx];
+}
+
+function splitToken(word) {
+  const leading = (word.match(/^[^A-Za-z0-9]*/) || [''])[0];
+  const trailing = (word.match(/[^A-Za-z0-9]*$/) || [''])[0];
+  const core = word.slice(leading.length, word.length - trailing.length);
+  return { leading, core, trailing };
+}
+
+function collapseSpanToBlank(words, start, end) {
+  const first = splitToken(words[start]);
+  const last = splitToken(words[end]);
+  const blankToken = `${first.leading}_____${last.trailing}`;
+  const answer = words
+    .slice(start, end + 1)
+    .map(w => splitToken(w).core)
+    .filter(Boolean)
+    .join(' ');
+
+  const blankedWords = [
+    ...words.slice(0, start),
+    blankToken,
+    ...words.slice(end + 1)
+  ];
+
+  return {
+    blankedPhrase: blankedWords.join(' '),
+    answer: answer || words.slice(start, end + 1).join(' ')
+  };
+}
+
+function findRepeatedConjunctionSpan(words) {
+  for (let i = 0; i <= words.length - 3; i++) {
+    const a = normalizeToken(words[i]);
+    const mid = normalizeToken(words[i + 1]);
+    const c = normalizeToken(words[i + 2]);
+    if (!a || !mid || !c) continue;
+    if ((mid === 'and' || mid === 'or') && a === c) {
+      return { start: i, end: i + 2 };
+    }
+  }
+  return null;
+}
+
+function buildContentWordBlank(phrase) {
+  const words = phrase.trim().split(/\s+/);
+  if (words.length === 1) {
+    return { blankedPhrase: '_____', answer: words[0] };
+  }
+
+  // Pattern like "up and up" => blank as one unit to avoid giveaway.
+  const repeatedSpan = findRepeatedConjunctionSpan(words);
+  if (repeatedSpan) {
+    return collapseSpanToBlank(words, repeatedSpan.start, repeatedSpan.end);
+  }
+
+  const contentIndexes = new Set(pickContentIndexes(words));
+  const answerWords = [];
+
+  const blankedWords = words.map((word, idx) => {
+    if (!contentIndexes.has(idx)) return word;
+
+    const { leading, core, trailing } = splitToken(word);
+    answerWords.push(core || word);
+    return `${leading}_____${trailing}`;
+  });
+
+  return {
+    blankedPhrase: blankedWords.join(' '),
+    answer: answerWords.join(' ')
+  };
+}
+
+function findAnswerSpanInPhraseWords(phraseWords, answerWords) {
+  if (answerWords.length === 0 || answerWords.length > phraseWords.length) return null;
+  const normalizedPhrase = phraseWords.map(normalizeToken);
+  const normalizedAnswer = answerWords.map(normalizeToken);
+
+  for (let start = 0; start <= phraseWords.length - answerWords.length; start++) {
+    let ok = true;
+    for (let i = 0; i < answerWords.length; i++) {
+      if (!normalizedAnswer[i] || normalizedPhrase[start + i] !== normalizedAnswer[i]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return { start, end: start + answerWords.length - 1 };
+  }
+  return null;
+}
+
+function buildBlankFromAnswerInPhrase(phrase, answer) {
+  const phraseWords = phrase.trim().split(/\s+/);
+  const answerWords = answer.trim().split(/\s+/);
+  const span = findAnswerSpanInPhraseWords(phraseWords, answerWords);
+  if (!span) return null;
+  return collapseSpanToBlank(phraseWords, span.start, span.end);
+}
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sentenceContainsPhrase(sentence, phrase) {
+  const safeSentence = (sentence || '').trim();
+  if (!safeSentence) return false;
+
+  const exactPattern = new RegExp(escapeRegex(phrase), 'i');
+  if (exactPattern.test(safeSentence)) return true;
+
+  const flexiblePattern = new RegExp(
+    phrase.trim().split(/\s+/).map(escapeRegex).join('\\s+'),
+    'i'
+  );
+  return flexiblePattern.test(safeSentence);
+}
+
+function replaceTextInSentence(sentence, text, replacement) {
+  const safeSentence = (sentence || '').trim();
+  const target = (text || '').trim();
+  if (!safeSentence || !target) return safeSentence;
+
+  const exactPattern = new RegExp(escapeRegex(target), 'i');
+  if (exactPattern.test(safeSentence)) {
+    return safeSentence.replace(exactPattern, replacement);
+  }
+
+  const flexiblePattern = new RegExp(
+    target.split(/\s+/).map(escapeRegex).join('\\s+'),
+    'i'
+  );
+  if (flexiblePattern.test(safeSentence)) {
+    return safeSentence.replace(flexiblePattern, replacement);
+  }
+
+  return safeSentence;
+}
+
+function replacePhraseInSentence(sentence, phrase, replacement) {
+  const safeSentence = (sentence || '').trim();
+  if (!safeSentence) return replacement;
+
+  const exactPattern = new RegExp(escapeRegex(phrase), 'i');
+  if (exactPattern.test(safeSentence)) {
+    return safeSentence.replace(exactPattern, replacement);
+  }
+
+  // Fallback: allow flexible whitespace between phrase tokens.
+  const flexiblePattern = new RegExp(
+    phrase.trim().split(/\s+/).map(escapeRegex).join('\\s+'),
+    'i'
+  );
+  if (flexiblePattern.test(safeSentence)) {
+    return safeSentence.replace(flexiblePattern, replacement);
+  }
+
+  // Last resort: append a blank form so user can still answer.
+  return `${safeSentence} (${replacement})`;
 }
 
 // Generate progressive hints (no AI needed — pure string manipulation)
@@ -509,7 +796,7 @@ function generateBlankHint(phrase, hintLevel, category) {
 }
 
 // Evaluate fill-in-the-blank answer
-async function evaluateBlankAnswer(phrase, meaning, sentence, userAnswer) {
+async function evaluateBlankAnswer(phrase, meaning, sentence, expectedAnswer, userAnswer) {
   const payload = JSON.stringify({
     model: 'gpt-4o-mini',
     temperature: 0.3,
@@ -517,14 +804,14 @@ async function evaluateBlankAnswer(phrase, meaning, sentence, userAnswer) {
     messages: [
       {
         role: 'system',
-        content: `You evaluate a fill-in-the-blank answer for an English vocabulary exercise. The user was given a sentence with a blank and needs to fill in the correct word or phrase.
+        content: `You evaluate a fill-in-the-blank answer for an English vocabulary exercise. The user was given a sentence with a blank and needs to fill in the expected missing word(s).
 
-Compare the user's answer to the correct phrase. Be lenient with:
+Compare the user's answer to the expected answer. Be lenient with:
 - Minor spelling variations
 - Capitalization differences
-- Reasonable conjugations or tense changes (e.g. "broke the ice" for "break the ice")
+- Reasonable inflections/word-form changes when meaning is clearly the same
 
-But the answer should essentially be the same phrase or a very close variation.
+But the answer should essentially match the expected missing word(s), while staying consistent with the full phrase context.
 
 Respond in JSON with exactly these fields:
 - "verdict": one of "correct", "partial", or "incorrect"
@@ -534,7 +821,7 @@ Only output valid JSON, nothing else.`
       },
       {
         role: 'user',
-        content: `Correct phrase: "${phrase}"\nMeaning: "${meaning}"\nSentence with blank: "${sentence}"\nUser's answer: "${userAnswer}"`
+        content: `Full phrase: "${phrase}"\nExpected answer for blank: "${expectedAnswer}"\nMeaning: "${meaning}"\nSentence with blank: "${sentence}"\nUser's answer: "${userAnswer}"`
       }
     ]
   });

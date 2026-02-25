@@ -741,6 +741,7 @@ textarea { resize: vertical; min-height: 80px; }
     </div>
     <div class="dashboard-actions">
       <button class="btn-primary" id="start-fill-blank-btn" onclick="openFillBlankTargetDialog()">Fill in the Blank</button>
+      <button class="btn-primary" id="start-daily-btn" onclick="startDailyMode()" style="background:var(--blue)">Daily Mode</button>
       <button class="btn-primary" id="start-write-sentence-btn" onclick="startWriteSentence()" style="background:var(--accent2)">Write a Sentence</button>
       <button class="btn-secondary" onclick="activeBucket=null;showScreen('browse')">Browse All Cards</button>
       <button class="btn-secondary" onclick="showAddForm()">Add New Card</button>
@@ -806,11 +807,12 @@ textarea { resize: vertical; min-height: 80px; }
   <div id="summary" class="screen">
     <div class="header">
       <div></div>
-      <h2>Session Complete</h2>
+      <h2 id="summary-header-title">Session Complete</h2>
       <div></div>
     </div>
     <div class="summary-card">
-      <h2>Nice work!</h2>
+      <h2 id="summary-title">Nice work!</h2>
+      <p id="summary-subtitle" style="display:none;color:var(--text-dim);margin-top:-10px;margin-bottom:18px;"></p>
       <div class="summary-stats">
         <div class="summary-stat">
           <span class="number" id="summary-reviewed" style="color:var(--blue)">0</span>
@@ -917,6 +919,7 @@ textarea { resize: vertical; min-height: 80px; }
 // ─── Data ───────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'idiom-quiz-cards';
+const DAILY_SESSION_KEY = 'idiom-quiz-daily-session';
 
 const SAMPLE_DATA = [
   { phrase: "Bite the bullet", meaning: "To endure a painful or difficult situation courageously", example: "I hate going to the dentist, but I'll just have to bite the bullet.", category: "idiom" },
@@ -951,7 +954,25 @@ function getToday() {
 
 function loadCards() {
   const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) return JSON.parse(stored);
+  if (stored) {
+    const parsed = JSON.parse(stored);
+    const today = getToday();
+    let touched = false;
+
+    for (const card of parsed) {
+      if (!card.createdAt) {
+        card.createdAt = today;
+        touched = true;
+      }
+      if (card.bucket && !card.bucketUpdatedAt) {
+        card.bucketUpdatedAt = card.lastReview || today;
+        touched = true;
+      }
+    }
+
+    if (touched) localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    return parsed;
+  }
 
   // First launch — seed with sample data
   const today = getToday();
@@ -962,6 +983,7 @@ function loadCards() {
     example: d.example || '',
     category: d.category || 'idiom',
     source: 'Sample',
+    createdAt: today,
     easeFactor: 2.5,
     interval: 0,
     repetitions: 0,
@@ -977,6 +999,106 @@ function saveCards(cards) {
 }
 
 let cards = loadCards();
+
+function daysSince(dateStr) {
+  if (!dateStr) return 9999;
+  const d = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return 9999;
+  const today = new Date(`${getToday()}T00:00:00`);
+  return Math.floor((today.getTime() - d.getTime()) / 86400000);
+}
+
+function allocateByWeights(total, weights) {
+  const quotas = {};
+  let used = 0;
+  for (const w of weights) {
+    quotas[w.key] = Math.floor(total * w.weight);
+    used += quotas[w.key];
+  }
+  let rem = total - used;
+  const order = [...weights].sort((a, b) => b.weight - a.weight);
+  for (let i = 0; rem > 0; i++, rem--) {
+    quotas[order[i % order.length].key]++;
+  }
+  return quotas;
+}
+
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function applyBucketChange(cardObj, nextBucket) {
+  const prev = cardObj.bucket || '';
+  if (!nextBucket) {
+    delete cardObj.bucket;
+    delete cardObj.bucketUpdatedAt;
+    return;
+  }
+  cardObj.bucket = nextBucket;
+  if (prev !== nextBucket || !cardObj.bucketUpdatedAt) {
+    cardObj.bucketUpdatedAt = getToday();
+  }
+}
+
+function loadDailySession() {
+  const raw = localStorage.getItem(DAILY_SESSION_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function saveDailySession(session) {
+  localStorage.setItem(DAILY_SESSION_KEY, JSON.stringify(session));
+}
+
+function getTodayDailySession() {
+  const session = loadDailySession();
+  if (!session || session.date !== getToday()) return null;
+  if (!Array.isArray(session.queueIds)) session.queueIds = [];
+  if (!Array.isArray(session.completedIds)) session.completedIds = [];
+  if (typeof session.goodOrBetter !== 'number') session.goodOrBetter = 0;
+  return session;
+}
+
+function getDailyRemainingCards(session) {
+  const completed = new Set(session.completedIds || []);
+  return (session.queueIds || [])
+    .map(id => cards.find(c => c.id === id))
+    .filter(Boolean)
+    .filter(c => !completed.has(c.id));
+}
+
+function createTodayDailySession(target = 30) {
+  const queue = buildDailyQueue(target);
+  const session = {
+    date: getToday(),
+    target: queue.length,
+    queueIds: queue.map(c => c.id),
+    completedIds: [],
+    goodOrBetter: 0
+  };
+  saveDailySession(session);
+  return session;
+}
+
+function recordDailyReview(cardId, isGoodOrBetter) {
+  const session = getTodayDailySession();
+  if (!session) return;
+  if (!session.completedIds.includes(cardId)) {
+    session.completedIds.push(cardId);
+    if (isGoodOrBetter) {
+      session.goodOrBetter = (session.goodOrBetter || 0) + 1;
+    }
+    saveDailySession(session);
+  }
+}
 
 // ─── SM-2 Algorithm ─────────────────────────────────────────────────────
 
@@ -1064,11 +1186,15 @@ function updateDashboard() {
 
   const noDue = due.length === 0;
   const noCards = cards.length === 0;
+  const noDailyEligible = cards.filter(c => (c.bucket || '') !== 'skip').length === 0;
   const fillBtn = document.getElementById('start-fill-blank-btn');
+  const dailyBtn = document.getElementById('start-daily-btn');
   const writeBtn = document.getElementById('start-write-sentence-btn');
   fillBtn.disabled = noCards;
+  if (dailyBtn) dailyBtn.disabled = noDailyEligible;
   writeBtn.disabled = noDue;
   fillBtn.textContent = noCards ? 'No cards yet' : 'Fill in the Blank';
+  if (dailyBtn) dailyBtn.textContent = noDailyEligible ? 'No cards yet' : 'Daily Mode';
   writeBtn.textContent = noDue ? 'Nothing due — come back later' : 'Write a Sentence';
 }
 
@@ -1090,6 +1216,7 @@ function getCardsByBucket(bucket) {
 
 function bucketLabel(bucket) {
   const labels = {
+    daily: 'Daily Mode',
     new: 'New',
     nope: 'Nope',
     kinda: 'Kinda',
@@ -1097,6 +1224,134 @@ function bucketLabel(bucket) {
     skip: 'Not Useful'
   };
   return labels[bucket] || bucket;
+}
+
+function getBucketDate(card) {
+  return card.bucketUpdatedAt || card.lastReview || card.createdAt || getToday();
+}
+
+function getRecencyBand(card) {
+  const days = daysSince(getBucketDate(card));
+  if (days <= 1) return 'd1';
+  if (days <= 3) return 'd23';
+  if (days <= 7) return 'd47';
+  return 'd8p';
+}
+
+function pickBucketByRecency(bucket, count, selectedIds) {
+  if (count <= 0) return [];
+  const pool = cards.filter(c => c.bucket === bucket && !selectedIds.has(c.id));
+  if (pool.length === 0) return [];
+
+  const bandOrder = ['d1', 'd23', 'd47', 'd8p'];
+  const weights = [
+    { key: 'd1', weight: 0.40 },
+    { key: 'd23', weight: 0.30 },
+    { key: 'd47', weight: 0.20 },
+    { key: 'd8p', weight: 0.10 }
+  ];
+  const quotas = allocateByWeights(count, weights);
+  const byBand = { d1: [], d23: [], d47: [], d8p: [] };
+
+  for (const card of pool) {
+    byBand[getRecencyBand(card)].push(card);
+  }
+  for (const key of bandOrder) shuffleInPlace(byBand[key]);
+
+  const picked = [];
+  for (const key of bandOrder) {
+    const bandPick = byBand[key].splice(0, quotas[key] || 0);
+    for (const c of bandPick) {
+      picked.push(c);
+      selectedIds.add(c.id);
+    }
+  }
+
+  let rem = count - picked.length;
+  if (rem > 0) {
+    for (const key of bandOrder) {
+      if (rem <= 0) break;
+      const bandPick = byBand[key].splice(0, rem);
+      for (const c of bandPick) {
+        picked.push(c);
+        selectedIds.add(c.id);
+      }
+      rem = count - picked.length;
+    }
+  }
+
+  return picked;
+}
+
+function pickNewCards(count, selectedIds) {
+  if (count <= 0) return [];
+  const pool = cards
+    .filter(c => !c.bucket && !selectedIds.has(c.id))
+    .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  const picked = pool.slice(0, count);
+  for (const c of picked) selectedIds.add(c.id);
+  return picked;
+}
+
+function pickNailedCards(count, selectedIds) {
+  if (count <= 0) return [];
+  const today = getToday();
+  const pool = cards
+    .filter(c => c.bucket === 'nailed' && !selectedIds.has(c.id))
+    .sort((a, b) => {
+      const aDue = a.nextReview && a.nextReview <= today ? 0 : 1;
+      const bDue = b.nextReview && b.nextReview <= today ? 0 : 1;
+      if (aDue !== bDue) return aDue - bDue;
+      const aDate = a.nextReview || '9999-12-31';
+      const bDate = b.nextReview || '9999-12-31';
+      return aDate.localeCompare(bDate);
+    });
+  const picked = pool.slice(0, count);
+  for (const c of picked) selectedIds.add(c.id);
+  return picked;
+}
+
+function pickDailyRemainder(count, selectedIds) {
+  if (count <= 0) return [];
+  const priority = { nope: 0, kinda: 1, '': 2, nailed: 3, skip: 9 };
+  const pool = cards
+    .filter(c => (c.bucket || '') !== 'skip' && !selectedIds.has(c.id))
+    .sort((a, b) => {
+      const pa = priority[a.bucket || ''] ?? 8;
+      const pb = priority[b.bucket || ''] ?? 8;
+      if (pa !== pb) return pa - pb;
+      return daysSince(getBucketDate(b)) - daysSince(getBucketDate(a));
+    });
+  const picked = pool.slice(0, count);
+  for (const c of picked) selectedIds.add(c.id);
+  return picked;
+}
+
+function buildDailyQueue(target = 30) {
+  const eligible = cards.filter(c => (c.bucket || '') !== 'skip');
+  if (eligible.length === 0) return [];
+  const total = Math.min(target, eligible.length);
+
+  const quotas = allocateByWeights(total, [
+    { key: 'nope', weight: 0.40 },
+    { key: 'kinda', weight: 0.27 },
+    { key: 'new', weight: 0.20 },
+    { key: 'nailed', weight: 0.13 }
+  ]);
+
+  const selectedIds = new Set();
+  const selected = [];
+
+  selected.push(...pickBucketByRecency('nope', quotas.nope, selectedIds));
+  selected.push(...pickBucketByRecency('kinda', quotas.kinda, selectedIds));
+  selected.push(...pickNewCards(quotas.new, selectedIds));
+  selected.push(...pickNailedCards(quotas.nailed, selectedIds));
+
+  if (selected.length < total) {
+    selected.push(...pickDailyRemainder(total - selected.length, selectedIds));
+  }
+
+  return shuffleInPlace(selected);
 }
 
 function openFillBlankTargetDialog() {
@@ -1132,6 +1387,38 @@ function startFillBlank(bucket) {
   showCurrentCard();
 }
 
+function startDailyMode() {
+  reviewMode = 'fill-blank';
+  fillBlankTarget = 'daily';
+  let dailySession = getTodayDailySession();
+  if (!dailySession) {
+    dailySession = createTodayDailySession(30);
+  }
+  reviewQueue = getDailyRemainingCards(dailySession);
+  closeFillBlankTargetDialog();
+
+  if (reviewQueue.length === 0) {
+    sessionStats = {
+      reviewed: dailySession.target || (dailySession.completedIds || []).length,
+      goodOrBetter: dailySession.goodOrBetter || 0
+    };
+    showSummary({
+      isDaily: true,
+      reviewed: sessionStats.reviewed,
+      goodOrBetter: sessionStats.goodOrBetter
+    });
+    return;
+  }
+
+  reviewIndex = 0;
+  sessionStats = {
+    reviewed: (dailySession.completedIds || []).length,
+    goodOrBetter: dailySession.goodOrBetter || 0
+  };
+  showScreen('review');
+  showCurrentCard();
+}
+
 function startWriteSentence() {
   reviewMode = 'write-sentence';
   reviewQueue = getDueCards().sort(() => Math.random() - 0.5);
@@ -1144,7 +1431,7 @@ function startWriteSentence() {
 
 function showCurrentCard() {
   if (reviewIndex >= reviewQueue.length) {
-    showSummary();
+    showSummary({ isDaily: fillBlankTarget === 'daily' });
     return;
   }
 
@@ -1177,9 +1464,18 @@ function showCurrentCard() {
   currentBlankData = null;
 
   // Update progress
-  const total = reviewQueue.length;
-  document.getElementById('review-progress-text').textContent = `${reviewIndex + 1} / ${total}`;
-  document.getElementById('review-progress-bar').style.width = `${((reviewIndex) / total) * 100}%`;
+  if (fillBlankTarget === 'daily') {
+    const dailySession = getTodayDailySession();
+    const total = Math.max(1, dailySession?.target || reviewQueue.length);
+    const completed = (dailySession?.completedIds || []).length;
+    const current = Math.min(total, completed + reviewIndex + 1);
+    document.getElementById('review-progress-text').textContent = `${current} / ${total}`;
+    document.getElementById('review-progress-bar').style.width = `${((current - 1) / total) * 100}%`;
+  } else {
+    const total = reviewQueue.length;
+    document.getElementById('review-progress-text').textContent = `${reviewIndex + 1} / ${total}`;
+    document.getElementById('review-progress-bar').style.width = `${((reviewIndex) / total) * 100}%`;
+  }
 
 
   // Auto-enter the selected mode
@@ -1290,10 +1586,12 @@ async function showFillBlank() {
     if (!response.ok) throw new Error('Failed to generate');
 
     const data = await response.json();
+    const expectedAnswer = (data.answer || card.phrase || '').trim();
     currentBlankData = {
       sentence: data.sentence,
       hint: data.hint,
-      answer: data.answer || card.phrase,
+      answer: expectedAnswer,
+      answerCategory: data.answerCategory || (expectedAnswer.split(/\s+/).length > 1 ? 'phrase' : 'word'),
       hintLevel: 0
     };
 
@@ -1357,6 +1655,7 @@ async function submitBlankAnswer() {
         phrase: card.phrase,
         meaning: card.meaning,
         sentence: currentBlankData.sentence,
+        expectedAnswer: currentBlankData.answer,
         userAnswer
       })
     });
@@ -1405,7 +1704,6 @@ async function submitBlankAnswer() {
 async function getBlankHint() {
   if (!currentBlankData) return;
 
-  const card = reviewQueue[reviewIndex];
   const nextLevel = (currentBlankData.hintLevel || 0) + 1;
   const maxLevel = currentBlankData.maxLevel || 3;
 
@@ -1418,7 +1716,11 @@ async function getBlankHint() {
     const response = await fetch('/api/blank-hint', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phrase: card.phrase, hintLevel: nextLevel, category: card.category })
+      body: JSON.stringify({
+        phrase: currentBlankData.answer,
+        hintLevel: nextLevel,
+        category: currentBlankData.answerCategory
+      })
     });
 
     if (!response.ok) throw new Error('Failed');
@@ -1489,11 +1791,14 @@ function rateCard(quality) {
 
   if (quality === -1) {
     // Not Useful — skip from future reviews
-    card.bucket = 'skip';
+    applyBucketChange(card, 'skip');
     const idx = cards.findIndex(c => c.id === card.id);
     if (idx !== -1) cards[idx] = card;
     saveCards(cards);
     sessionStats.reviewed++;
+    if (fillBlankTarget === 'daily') {
+      recordDailyReview(card.id, false);
+    }
     reviewIndex++;
     showCurrentCard();
     return;
@@ -1505,6 +1810,10 @@ function rateCard(quality) {
   if (quality === 0) updates.bucket = 'nope';
   else if (quality === 3) updates.bucket = 'kinda';
   else updates.bucket = 'nailed';
+  const prevBucket = card.bucket || '';
+  if (prevBucket !== updates.bucket || !card.bucketUpdatedAt) {
+    updates.bucketUpdatedAt = getToday();
+  }
 
   // Apply updates to card
   Object.assign(card, updates);
@@ -1516,12 +1825,19 @@ function rateCard(quality) {
 
   sessionStats.reviewed++;
   if (quality >= 4) sessionStats.goodOrBetter++;
+  if (fillBlankTarget === 'daily') {
+    recordDailyReview(card.id, quality >= 4);
+  }
 
   reviewIndex++;
   showCurrentCard();
 }
 
 function endReview() {
+  if (fillBlankTarget === 'daily') {
+    showScreen('dashboard');
+    return;
+  }
   if (sessionStats.reviewed > 0) {
     showSummary();
   } else {
@@ -1529,12 +1845,31 @@ function endReview() {
   }
 }
 
-function showSummary() {
-  document.getElementById('summary-reviewed').textContent = sessionStats.reviewed;
-  const pct = sessionStats.reviewed > 0
-    ? Math.round((sessionStats.goodOrBetter / sessionStats.reviewed) * 100)
+function showSummary(options = {}) {
+  const reviewed = typeof options.reviewed === 'number' ? options.reviewed : sessionStats.reviewed;
+  const goodOrBetter = typeof options.goodOrBetter === 'number' ? options.goodOrBetter : sessionStats.goodOrBetter;
+  const isDaily = !!options.isDaily;
+
+  document.getElementById('summary-reviewed').textContent = reviewed;
+  const pct = reviewed > 0
+    ? Math.round((goodOrBetter / reviewed) * 100)
     : 0;
   document.getElementById('summary-accuracy').textContent = pct + '%';
+
+  const headerTitle = document.getElementById('summary-header-title');
+  const title = document.getElementById('summary-title');
+  const subtitle = document.getElementById('summary-subtitle');
+  if (isDaily) {
+    headerTitle.textContent = 'Daily Complete';
+    title.textContent = 'Amazing work today!';
+    subtitle.textContent = "You finished today's Daily Mode set.";
+    subtitle.style.display = 'block';
+  } else {
+    headerTitle.textContent = 'Session Complete';
+    title.textContent = 'Nice work!';
+    subtitle.style.display = 'none';
+    subtitle.textContent = '';
+  }
 
   // Update progress bar to 100%
   document.getElementById('review-progress-bar').style.width = '100%';
@@ -1676,8 +2011,8 @@ function saveCard() {
       cards[idx].meaning = meaning;
       cards[idx].example = example;
       cards[idx].category = category;
-      if (bucket) cards[idx].bucket = bucket;
-      else delete cards[idx].bucket;
+      cards[idx].createdAt = cards[idx].createdAt || getToday();
+      applyBucketChange(cards[idx], bucket || '');
     }
     // Also update the review queue copy if editing from review
     if (editingFromReview) {
@@ -1687,8 +2022,8 @@ function saveCard() {
         reviewQueue[rIdx].meaning = meaning;
         reviewQueue[rIdx].example = example;
         reviewQueue[rIdx].category = category;
-        if (bucket) reviewQueue[rIdx].bucket = bucket;
-        else delete reviewQueue[rIdx].bucket;
+        reviewQueue[rIdx].createdAt = reviewQueue[rIdx].createdAt || getToday();
+        applyBucketChange(reviewQueue[rIdx], bucket || '');
       }
     }
     showToast('Card updated');
@@ -1698,6 +2033,8 @@ function saveCard() {
       phrase, meaning, example, category,
       bucket: bucket || undefined,
       source: 'Manual',
+      createdAt: getToday(),
+      bucketUpdatedAt: bucket ? getToday() : undefined,
       easeFactor: 2.5,
       interval: 0,
       repetitions: 0,
@@ -1768,6 +2105,9 @@ function importJSON() {
       meaning: item.meaning || '',
       example: item.example || '',
       category: item.category || 'idiom',
+      bucket: item.bucket || undefined,
+      bucketUpdatedAt: item.bucket ? today : undefined,
+      createdAt: today,
       source: item.source || 'JSON Import',
       easeFactor: 2.5,
       interval: 0,
@@ -1860,6 +2200,9 @@ async function importFromNotion() {
         meaning: item.meaning || '',
         example: item.example || '',
         category: item.category || 'idiom',
+        bucket: item.bucket || undefined,
+        bucketUpdatedAt: item.bucket ? today : undefined,
+        createdAt: today,
         source: item.source || 'Notion',
         easeFactor: 2.5,
         interval: 0,
@@ -1941,6 +2284,9 @@ async function importFromAppleNotes() {
         meaning: item.meaning || '',
         example: item.example || '',
         category: item.category || 'idiom',
+        bucket: item.bucket || undefined,
+        bucketUpdatedAt: item.bucket ? today : undefined,
+        createdAt: today,
         source: item.source || 'Apple Notes',
         easeFactor: 2.5,
         interval: 0,
@@ -2170,6 +2516,9 @@ document.addEventListener('keydown', (e) => {
         meaning: item.meaning || '',
         example: item.example || '',
         category: item.category || 'idiom',
+        bucket: item.bucket || undefined,
+        bucketUpdatedAt: item.bucket ? today : undefined,
+        createdAt: today,
         source: item.source || fallbackSource,
         easeFactor: 2.5,
         interval: 0,
@@ -2188,6 +2537,15 @@ document.addEventListener('keydown', (e) => {
   const samplePhrases = new Set(SAMPLE_DATA.map(d => d.phrase.toLowerCase()));
   let updated = 0;
   for (const card of cards) {
+    if (!card.createdAt) {
+      card.createdAt = today;
+      updated++;
+    }
+    if (card.bucket && !card.bucketUpdatedAt) {
+      card.bucketUpdatedAt = card.lastReview || today;
+      updated++;
+    }
+
     if (card.source) continue;
     const key = (card.phrase || '').toLowerCase();
     if (samplePhrases.has(key)) {
