@@ -1,0 +1,12 @@
+{
+  "name": "idiom-quiz",
+  "version": "1.0.0",
+  "description": "Idiom and vocabulary flashcard quiz app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

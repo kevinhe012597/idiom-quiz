@@ -23,7 +23,7 @@ const { syncFromAppleNotes } = require('./apple-notes-sync');
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
-const DB_PATH = path.join(__dirname, 'idiom-quiz.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'idiom-quiz.db');
 
 // Notion page IDs to sync (Word List + subpages)
 const NOTION_PAGE_IDS = (process.env.NOTION_PAGE_IDS || '6c5f0587-e35c-4c01-9b38-c42ba9f4a230').split(',').map(s => s.trim());
@@ -316,6 +316,39 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Batch enrich: takes a list of words/phrases, returns meanings, examples, categories
+  if (req.method === 'POST' && req.url === '/api/batch-enrich') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { phrases } = JSON.parse(body);
+        if (!Array.isArray(phrases) || phrases.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing required field: phrases (non-empty array)' }));
+          return;
+        }
+
+        // Process in batches of 10
+        const BATCH_SIZE = 10;
+        const results = [];
+        for (let i = 0; i < phrases.length; i += BATCH_SIZE) {
+          const batch = phrases.slice(i, i + BATCH_SIZE);
+          const batchResults = await enrichBatch(batch);
+          results.push(...batchResults);
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ results }));
+      } catch (err) {
+        console.error('Batch enrich error:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   // Serve static files
   let filePath = req.url === '/' ? '/index.html' : req.url;
   filePath = path.join(__dirname, filePath);
@@ -570,6 +603,7 @@ Only output valid JSON, nothing else.`
           const answerCategory = answer.split(/\s+/).length > 1 ? 'phrase' : 'word';
           resolve({
             sentence: sentenceWithBlank,
+            fullSentence: fullSentence || '',
             hint,
             answer,
             answerCategory
@@ -942,6 +976,80 @@ function sanitizeCards(cards) {
 
 function saveCardsToDb(cards) {
   upsertAppStateStmt.run('cards', JSON.stringify(cards), new Date().toISOString());
+}
+
+async function enrichBatch(phrases) {
+  const numbered = phrases.map((p, i) => `${i + 1}. ${p}`).join('\n');
+  const payload = JSON.stringify({
+    model: 'gpt-4o-mini',
+    temperature: 0.3,
+    max_tokens: 2000,
+    messages: [
+      {
+        role: 'system',
+        content: `You enrich English vocabulary entries. For each word/phrase given, provide:
+1. "meaning": a clear, concise definition (1-2 sentences)
+2. "example": a natural example sentence using it in context
+3. "category": one of "idiom", "word", or "phrase"
+   - "idiom" = figurative expression whose meaning isn't obvious from the words (e.g. "break the ice", "under the weather")
+   - "phrase" = multi-word expression that isn't an idiom (e.g. "pros and cons", "take into account")
+   - "word" = single word or compound word (e.g. "ubiquitous", "shortchange")
+
+Respond with a JSON array in the same order as the input. Each element must have exactly: "phrase", "meaning", "example", "category".
+
+Only output valid JSON, nothing else.`
+      },
+      {
+        role: 'user',
+        content: numbered
+      }
+    ]
+  });
+
+  const https = require('https');
+
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.openai.com',
+      path: '/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    };
+
+    const apiReq = https.request(options, (apiRes) => {
+      let data = '';
+      apiRes.on('data', chunk => { data += chunk; });
+      apiRes.on('end', () => {
+        if (apiRes.statusCode !== 200) {
+          reject(new Error(`OpenAI API error: ${apiRes.statusCode} — ${data}`));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(data);
+          const content = parsed.choices[0].message.content.trim();
+          const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+          const results = JSON.parse(jsonStr);
+          // Ensure we return the original phrase text even if the model tweaks it
+          resolve(results.map((r, i) => ({
+            phrase: phrases[i],
+            meaning: r.meaning || '',
+            example: r.example || '',
+            category: r.category || 'word'
+          })));
+        } catch (e) {
+          reject(new Error('Failed to parse OpenAI response for batch enrich'));
+        }
+      });
+    });
+
+    apiReq.on('error', reject);
+    apiReq.write(payload);
+    apiReq.end();
+  });
 }
 
 server.listen(PORT, () => {
