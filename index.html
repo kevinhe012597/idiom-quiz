@@ -309,6 +309,21 @@ textarea { resize: vertical; min-height: 80px; }
   border-radius: 8px;
   transition: width 0.3s ease;
 }
+.review-nav-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.btn-prev, .btn-continue {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.btn-prev:hover, .btn-continue:hover { background: var(--surface2); }
 .progress-text {
   text-align: center;
   color: var(--text-dim);
@@ -1031,6 +1046,10 @@ textarea { resize: vertical; min-height: 80px; }
     <div class="progress-text" id="review-progress-text">0 / 0</div>
     <div class="progress-bar-container">
       <div class="progress-bar-fill" id="review-progress-bar"></div>
+    </div>
+    <div class="review-nav-row" id="review-nav-row" style="display:none;">
+      <button class="btn-prev" id="btn-prev" onclick="goToPreviousCard()">&larr; Previous</button>
+      <button class="btn-prev" id="btn-continue" onclick="returnToCurrentCard()" style="display:none;">Continue &rarr;</button>
     </div>
     <div class="flashcard" id="flashcard" onclick="onFlashcardTap()">
       <div class="category-badge" id="card-category"></div>
@@ -1799,6 +1818,9 @@ let answerRevealed = false;
 let currentBlankData = null; // { sentence, hint, answer, hintLevel }
 let reviewMode = 'fill-blank'; // 'fill-blank' or 'write-sentence'
 let fillBlankTarget = null; // 'new' | 'nope' | 'kinda' | 'nailed' | 'skip'
+let reviewHistory = []; // ordered list of reviewed card indices
+let viewingPrevious = false; // true when browsing back through history
+let historyBrowseIndex = -1; // position within reviewHistory when browsing
 
 function getCardsByBucket(bucket) {
   if (!bucket) return getDueCards();
@@ -2021,11 +2043,45 @@ function startWriteSentence() {
   showCurrentCard();
 }
 
+let savedReviewIndex = 0; // where to return after viewing previous
+
+function goToPreviousCard() {
+  if (!viewingPrevious) {
+    // First time going back — start from end of history
+    if (reviewHistory.length === 0) return;
+    savedReviewIndex = reviewIndex;
+    historyBrowseIndex = reviewHistory.length - 1;
+  } else {
+    // Already browsing — go further back
+    if (historyBrowseIndex <= 0) return;
+    historyBrowseIndex--;
+  }
+  viewingPrevious = true;
+  reviewIndex = reviewHistory[historyBrowseIndex];
+  showCurrentCard();
+}
+
+function returnToCurrentCard() {
+  viewingPrevious = false;
+  reviewIndex = savedReviewIndex;
+  historyBrowseIndex = -1;
+  showCurrentCard();
+}
+
 function showCurrentCard() {
   if (reviewIndex >= reviewQueue.length) {
     showSummary({ isDaily: fillBlankTarget === 'daily' });
     return;
   }
+
+  // Show/hide navigation row
+  const hasHistory = reviewHistory.length > 0;
+  const navRow = document.getElementById('review-nav-row');
+  const prevBtn = document.getElementById('btn-prev');
+  const contBtn = document.getElementById('btn-continue');
+  navRow.style.display = hasHistory ? 'flex' : 'none';
+  prevBtn.style.display = (viewingPrevious ? historyBrowseIndex > 0 : hasHistory) ? 'inline-block' : 'none';
+  contBtn.style.display = viewingPrevious ? 'inline-block' : 'none';
 
   const card = reviewQueue[reviewIndex];
   answerRevealed = false;
@@ -2070,6 +2126,25 @@ function showCurrentCard() {
     document.getElementById('review-progress-bar').style.width = `${((reviewIndex) / total) * 100}%`;
   }
 
+
+  // If viewing a previous card, show it revealed (read-only)
+  if (viewingPrevious) {
+    document.getElementById('flashcard').style.display = '';
+    document.getElementById('fill-blank-section').classList.remove('visible');
+    document.getElementById('card-phrase').style.display = 'block';
+    document.getElementById('card-category').style.display = 'block';
+    document.getElementById('card-meaning').style.display = 'block';
+    document.getElementById('card-example').style.display = 'block';
+    document.getElementById('card-divider').style.display = 'block';
+    document.getElementById('btn-regen-example').style.display = 'inline-block';
+    if (card.source) document.getElementById('card-source').style.display = 'block';
+    document.getElementById('answer-section').classList.remove('visible');
+    document.getElementById('review-card-actions').style.display = 'none';
+    document.getElementById('llm-feedback').className = 'llm-feedback';
+    return;
+  }
+
+  document.getElementById('review-card-actions').style.display = '';
 
   // Auto-enter the selected mode
   if (reviewMode === 'fill-blank') {
@@ -2422,7 +2497,10 @@ function editCurrentCard() {
 }
 
 function rateCard(quality) {
+  viewingPrevious = false;
+  historyBrowseIndex = -1;
   const card = reviewQueue[reviewIndex];
+  reviewHistory.push(reviewIndex);
 
   if (quality === -1) {
     // Not Useful — skip from future reviews
