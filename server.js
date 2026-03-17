@@ -162,6 +162,68 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Daily session sync (GET / PUT)
+  if (req.url === '/api/daily-session') {
+    if (req.method === 'GET') {
+      try {
+        const row = selectAppStateStmt.get('daily_session');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(row ? row.value : 'null');
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+    if (req.method === 'PUT') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const session = JSON.parse(body || 'null');
+          upsertAppStateStmt.run('daily_session', JSON.stringify(session), new Date().toISOString());
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+  }
+
+  // Daily completions sync (GET / PUT)
+  if (req.url === '/api/daily-completions') {
+    if (req.method === 'GET') {
+      try {
+        const row = selectAppStateStmt.get('daily_completions');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(row ? row.value : '[]');
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+    if (req.method === 'PUT') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const completions = JSON.parse(body || '[]');
+          upsertAppStateStmt.run('daily_completions', JSON.stringify(completions), new Date().toISOString());
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+  }
+
   // Notion live sync — fetches from Notion API, parses, backfills, saves
   if (req.method === 'POST' && req.url === '/api/sync-notion') {
     if (!NOTION_TOKEN) {

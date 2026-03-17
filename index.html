@@ -147,6 +147,100 @@ textarea { resize: vertical; min-height: 80px; }
   gap: 12px;
 }
 
+/* ─── Daily Calendar / Progress Tracker ─────────────────────────── */
+.dashboard-bottom {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.dashboard-bottom .dashboard-actions {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.calendar-widget {
+  background: var(--surface);
+  border: 1px solid var(--surface2);
+  box-shadow: 0 8px 22px rgba(59, 130, 246, 0.08);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+.progress-tracker {
+  width: 195px;
+  flex-shrink: 0;
+}
+.progress-tracker-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.calendar-header .cal-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.cal-nav {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1rem;
+  padding: 2px 5px;
+  border-radius: 6px;
+  cursor: pointer;
+  line-height: 1;
+  width: auto;
+}
+.cal-nav:hover { background: var(--surface2); color: var(--text); }
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  text-align: center;
+}
+.cal-day-name {
+  font-size: 0.58rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  padding: 3px 0;
+}
+.cal-day {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  line-height: 1.1;
+}
+.cal-day.in-month { color: var(--text); }
+.cal-day.today {
+  background: var(--surface2);
+  font-weight: 700;
+  color: var(--accent2);
+}
+.cal-day.completed {
+  background: rgba(250, 204, 21, 0.15);
+}
+.cal-star {
+  font-size: 0.5rem;
+  line-height: 1;
+  display: none;
+}
+.cal-day.completed .cal-star { display: block; }
+
 .fill-target-dialog {
   position: fixed;
   inset: 0;
@@ -272,6 +366,21 @@ textarea { resize: vertical; min-height: 80px; }
   color: var(--text-dim);
   font-style: italic;
   text-align: center;
+}
+.flashcard .blank-sentence-reveal {
+  font-size: 0.95rem;
+  color: var(--text);
+  text-align: center;
+  margin-bottom: 8px;
+  padding: 10px 14px;
+  background: #f0fdf4;
+  border-radius: 8px;
+  border: 1px solid #bbf7d0;
+  line-height: 1.5;
+}
+.flashcard .blank-sentence-reveal .answer-highlight {
+  font-weight: 700;
+  color: var(--green);
 }
 .flashcard .tap-hint {
   color: var(--text-dim);
@@ -670,10 +779,159 @@ textarea { resize: vertical; min-height: 80px; }
   margin-top: 12px;
 }
 
+.lookup-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.lookup-input-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius);
+  font-size: 1rem;
+  color: var(--text);
+  background: var(--surface);
+}
+.lookup-input-row button {
+  flex-shrink: 0;
+  width: auto;
+  padding: 12px 20px;
+}
+
+.verify-feedback {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 16px;
+  border: 1px solid var(--surface2);
+}
+.verify-verdict {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.verify-verdict.correct { color: var(--green); }
+.verify-verdict.partial { color: var(--orange); }
+.verify-verdict.incorrect { color: var(--red); }
+.verify-sentence-highlight {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: var(--bg);
+  border-radius: 8px;
+}
+.verify-sentence-highlight .phrase-hl {
+  background: #dcfce7;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-weight: 600;
+  color: var(--green);
+}
+.verify-sentence-highlight .phrase-hl.wrong {
+  background: #fee2e2;
+  color: var(--red);
+}
+.verify-sentence-highlight .phrase-hl.partial {
+  background: #fef3c7;
+  color: #92400e;
+}
+.verify-explanation {
+  font-size: 0.9rem;
+  color: var(--text);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.verify-meaning {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 .import-section {
   margin-top: 32px;
   padding-top: 24px;
   border-top: 1px solid var(--surface2);
+}
+
+.qa-card {
+  background: var(--surface);
+  border: 1px solid var(--surface2);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.qa-card.is-dupe {
+  border-color: var(--orange);
+  opacity: 0.7;
+}
+.qa-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.qa-card-header .phrase {
+  font-weight: 600;
+  font-size: 1rem;
+}
+.qa-card-header .tag {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--surface2);
+  color: var(--text-dim);
+}
+.qa-card-header .dupe-tag {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #fef3c7;
+  color: #92400e;
+}
+.qa-card textarea {
+  width: 100%;
+  border: 1px solid var(--surface2);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 40px;
+  color: var(--text);
+  background: var(--bg);
+}
+.qa-card .example-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 6px;
+}
+.qa-card .example-text {
+  flex: 1;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-style: italic;
+  line-height: 1.5;
+  padding-top: 4px;
+}
+.qa-card .regen-btn {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--surface2);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.qa-card .regen-btn:hover {
+  background: var(--surface2);
+}
+.qa-card .regen-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Toast */
@@ -699,6 +957,8 @@ textarea { resize: vertical; min-height: 80px; }
   .flashcard .phrase { font-size: 1.4rem; }
   .stats-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .bucket-grid { grid-template-columns: repeat(3, 1fr); }
+  .dashboard-bottom { flex-direction: column; }
+  .progress-tracker { width: 100%; }
   .stat-card { padding: 14px 8px; }
   .stat-card .number { font-size: 1.5rem; }
   .rating-buttons { grid-template-columns: repeat(4, 1fr); gap: 6px; }
@@ -739,12 +999,25 @@ textarea { resize: vertical; min-height: 80px; }
         <span class="label">New</span>
       </div>
     </div>
-    <div class="dashboard-actions">
-      <button class="btn-primary" id="start-fill-blank-btn" onclick="openFillBlankTargetDialog()">Fill in the Blank</button>
-      <button class="btn-primary" id="start-daily-btn" onclick="startDailyMode()" style="background:var(--blue)">Daily Mode</button>
-      <button class="btn-primary" id="start-write-sentence-btn" onclick="startWriteSentence()" style="background:var(--accent2)">Write a Sentence</button>
-      <button class="btn-secondary" onclick="activeBucket=null;showScreen('browse')">Browse All Cards</button>
-      <button class="btn-secondary" onclick="showAddForm()">Add New Card</button>
+    <div class="dashboard-bottom">
+      <div class="dashboard-actions">
+        <button class="btn-primary" id="start-fill-blank-btn" onclick="openFillBlankTargetDialog()">Fill in the Blank</button>
+        <button class="btn-primary" id="start-daily-btn" onclick="startDailyMode()" style="background:var(--blue)">Daily Mode</button>
+        <button class="btn-primary" id="start-write-sentence-btn" onclick="startWriteSentence()" style="background:var(--accent2)">Write a Sentence</button>
+        <button class="btn-secondary" onclick="activeBucket=null;showScreen('browse')">Browse All Cards</button>
+        <button class="btn-secondary" onclick="showAddForm()">Add New Cards</button>
+        <button class="btn-secondary" onclick="showLookup()">Look Up a Word</button>
+        <button class="btn-secondary" onclick="showVerify()">Verify a Phrase</button>
+      </div>
+      <div class="calendar-widget progress-tracker" id="daily-calendar">
+        <div class="progress-tracker-label">Progress Tracker</div>
+        <div class="calendar-header">
+          <button class="cal-nav" onclick="calendarPrevMonth()">&#8249;</button>
+          <span class="cal-title" id="cal-title"></span>
+          <button class="cal-nav" onclick="calendarNextMonth()">&#8250;</button>
+        </div>
+        <div class="calendar-grid" id="cal-grid"></div>
+      </div>
     </div>
   </div>
 
@@ -763,6 +1036,7 @@ textarea { resize: vertical; min-height: 80px; }
       <div class="category-badge" id="card-category"></div>
       <div class="phrase" id="card-phrase"></div>
       <div class="tap-hint" id="tap-hint">Tap to reveal</div>
+      <div class="blank-sentence-reveal" id="card-blank-sentence" style="display:none"></div>
       <div class="divider" id="card-divider" style="display:none"></div>
       <div class="meaning" id="card-meaning" style="display:none"></div>
       <div class="example" id="card-example" style="display:none"></div>
@@ -850,53 +1124,146 @@ textarea { resize: vertical; min-height: 80px; }
   <div id="add-edit" class="screen">
     <div class="header">
       <button class="back" onclick="cancelEdit()">&larr;</button>
-      <h2 id="form-title">Add Card</h2>
+      <h2 id="form-title">Add Cards</h2>
       <div></div>
     </div>
-    <div class="form-group">
-      <label>Phrase / Word / Idiom</label>
-      <input type="text" id="input-phrase" placeholder="e.g. bite the bullet">
+
+    <!-- Edit form (only shown when editing an existing card) -->
+    <div id="edit-form-fields" style="display:none;">
+      <div class="form-group">
+        <label>Phrase / Word / Idiom</label>
+        <input type="text" id="input-phrase" placeholder="e.g. bite the bullet">
+      </div>
+      <div class="form-group">
+        <label>Meaning</label>
+        <textarea id="input-meaning" placeholder="e.g. To endure a painful situation courageously"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Example (optional)</label>
+        <textarea id="input-example" placeholder="e.g. I hate going to the dentist, but I'll just have to bite the bullet."></textarea>
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="input-category">
+          <option value="idiom">Idiom</option>
+          <option value="word">Word</option>
+          <option value="phrase">Phrase</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Bucket</label>
+        <select id="input-bucket">
+          <option value="">Unassigned</option>
+          <option value="nope">Nope</option>
+          <option value="kinda">Kinda</option>
+          <option value="nailed">Nailed it</option>
+          <option value="skip">Not Useful</option>
+        </select>
+      </div>
+      <div class="form-actions">
+        <button class="btn-secondary" onclick="cancelEdit()">Cancel</button>
+        <button class="btn-primary" id="save-card-btn" onclick="saveCard()">Save</button>
+      </div>
+      <button class="btn-secondary delete-btn" id="delete-card-btn" style="display:none" onclick="deleteCard()">Delete Card</button>
     </div>
-    <div class="form-group">
-      <label>Meaning</label>
-      <textarea id="input-meaning" placeholder="e.g. To endure a painful situation courageously"></textarea>
+
+    <!-- Quick Add (shown when adding new cards) -->
+    <div id="quick-add-section">
+    <div class="import-section" style="margin-top:0; padding-top:0; border-top:none;">
+      <h2>Quick Add</h2>
+      <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:12px;">
+        Paste words or phrases, one per line. AI will auto-generate meanings, examples, and categories.
+      </p>
+      <div id="quick-add-step1">
+        <textarea id="quick-add-input" rows="6" placeholder="Type or paste words here, one per line"></textarea>
+        <div id="quick-add-progress" style="display:none; margin-top:8px;">
+          <div style="background:var(--surface2); border-radius:8px; overflow:hidden; height:8px;">
+            <div id="quick-add-bar" style="background:var(--accent); height:100%; width:0%; transition:width 0.3s;"></div>
+          </div>
+          <p id="quick-add-status" style="color:var(--text-dim); font-size:0.85rem; margin-top:6px;">Processing...</p>
+        </div>
+        <button class="btn-primary" id="quick-add-btn" style="margin-top:8px;" onclick="quickAddGenerate()">Generate</button>
+      </div>
+      <div id="quick-add-step2" style="display:none;">
+        <div id="quick-add-preview"></div>
+        <div style="display:flex; gap:8px; margin-top:12px;">
+          <button class="btn-secondary" onclick="quickAddReset()">Back</button>
+          <button class="btn-primary" id="quick-add-confirm-btn" onclick="quickAddConfirm()">Add All Cards</button>
+        </div>
+      </div>
     </div>
-    <div class="form-group">
-      <label>Example (optional)</label>
-      <textarea id="input-example" placeholder="e.g. I hate going to the dentist, but I'll just have to bite the bullet."></textarea>
-    </div>
-    <div class="form-group">
-      <label>Category</label>
-      <select id="input-category">
-        <option value="idiom">Idiom</option>
-        <option value="word">Word</option>
-        <option value="phrase">Phrase</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Bucket</label>
-      <select id="input-bucket">
-        <option value="">Unassigned</option>
-        <option value="nope">Nope</option>
-        <option value="kinda">Kinda</option>
-        <option value="nailed">Nailed it</option>
-        <option value="skip">Not Useful</option>
-      </select>
-    </div>
-    <div class="form-actions">
-      <button class="btn-secondary" onclick="cancelEdit()">Cancel</button>
-      <button class="btn-primary" id="save-card-btn" onclick="saveCard()">Save</button>
-    </div>
-    <button class="btn-secondary delete-btn" id="delete-card-btn" style="display:none" onclick="deleteCard()">Delete Card</button>
 
     <div class="import-section">
-      <h2>Bulk Import (JSON)</h2>
-      <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:12px;">
-        Paste a JSON array of objects with "phrase", "meaning", "example" (optional), and "category" (optional) fields.
-      </p>
-      <textarea id="import-json" rows="5" placeholder='[{"phrase":"...", "meaning":"...", "example":"...", "category":"idiom"}]'></textarea>
-      <button class="btn-secondary" style="margin-top:8px" onclick="importJSON()">Import</button>
+      <details>
+        <summary style="cursor:pointer; color:var(--text-dim); font-size:0.85rem;">Advanced: Bulk Import (JSON)</summary>
+        <div style="margin-top:12px;">
+          <textarea id="import-json" rows="5" placeholder='[{"phrase":"...", "meaning":"...", "example":"...", "category":"idiom"}]'></textarea>
+          <button class="btn-secondary" style="margin-top:8px" onclick="importJSON()">Import</button>
+        </div>
+      </details>
     </div>
+    </div>
+  </div>
+</div>
+
+<!-- Look Up Screen -->
+<div id="lookup" class="screen">
+  <div class="header">
+    <button class="back" onclick="showScreen('dashboard')">&larr;</button>
+    <h2>Look Up</h2>
+    <div></div>
+  </div>
+  <div class="lookup-input-row">
+    <input type="text" id="lookup-input" placeholder="Type a word or phrase..." autocomplete="off">
+    <button class="btn-primary" id="lookup-btn" onclick="doLookup()">Look Up</button>
+  </div>
+  <div id="lookup-result" style="display:none;">
+    <div class="qa-card" id="lookup-card">
+      <div class="qa-card-header">
+        <span class="phrase" id="lookup-phrase"></span>
+        <span class="tag" id="lookup-category"></span>
+        <span class="dupe-tag" id="lookup-dupe" style="display:none;">already in deck</span>
+      </div>
+      <div style="margin-top:8px;">
+        <label style="font-size:0.8rem; color:var(--text-dim);">Meaning</label>
+        <div id="lookup-meaning" style="font-size:0.95rem; margin-top:4px;"></div>
+      </div>
+      <div class="example-row">
+        <span class="example-text" id="lookup-example"></span>
+        <button class="regen-btn" onclick="lookupRegenExample()">↻ New example</button>
+      </div>
+    </div>
+    <button class="btn-primary" id="lookup-add-btn" onclick="lookupAddCard()" style="margin-top:12px; width:100%;">Add to Deck</button>
+  </div>
+</div>
+
+<!-- Verify a Phrase Screen -->
+<div id="verify" class="screen">
+  <div class="header">
+    <button class="back" onclick="showScreen('dashboard')">&larr;</button>
+    <h2>Verify a Phrase</h2>
+    <div></div>
+  </div>
+  <p style="color:var(--text-dim); font-size:0.9rem; margin-bottom:16px;">
+    Type the phrase you want to check, then write a sentence using it. AI will tell you if you used it correctly.
+  </p>
+  <div class="form-group">
+    <label>Phrase</label>
+    <input type="text" id="verify-phrase" placeholder="e.g. bite the bullet">
+  </div>
+  <div class="form-group">
+    <label>Your sentence</label>
+    <textarea id="verify-sentence" rows="3" placeholder="e.g. I decided to bite the bullet and ask for a raise."></textarea>
+  </div>
+  <button class="btn-primary" id="verify-btn" onclick="doVerify()" style="width:100%;">Check My Usage</button>
+  <div id="verify-result" style="display:none; margin-top:16px;">
+    <div class="verify-feedback" id="verify-feedback">
+      <div class="verify-verdict" id="verify-verdict"></div>
+      <div class="verify-sentence-highlight" id="verify-sentence-display"></div>
+      <div class="verify-explanation" id="verify-explanation"></div>
+      <div class="verify-meaning" id="verify-meaning"></div>
+    </div>
+    <button class="btn-secondary" id="verify-add-btn" onclick="verifyAddCard()" style="width:100%; margin-top:12px; display:none;">Add to Deck</button>
   </div>
 </div>
 
@@ -920,6 +1287,7 @@ textarea { resize: vertical; min-height: 80px; }
 
 const STORAGE_KEY = 'idiom-quiz-cards';
 const DAILY_SESSION_KEY = 'idiom-quiz-daily-session';
+const DAILY_COMPLETIONS_KEY = 'idiom-quiz-daily-completions';
 const CARDS_API_ENDPOINT = '/api/cards';
 const SERVER_SYNC_DEBOUNCE_MS = 350;
 
@@ -956,7 +1324,8 @@ function generateId() {
 }
 
 function getToday() {
-  return new Date().toISOString().split('T')[0];
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function normalizeCardsForApp(rawCards) {
@@ -1098,6 +1467,9 @@ async function syncCardsWithServerOnStartup() {
 
 let cards = loadCards();
 
+let calendarYear = new Date().getFullYear();
+let calendarMonth = new Date().getMonth(); // 0-indexed
+
 function daysSince(dateStr) {
   if (!dateStr) return 9999;
   const d = new Date(`${dateStr}T00:00:00`);
@@ -1154,6 +1526,35 @@ function loadDailySession() {
 
 function saveDailySession(session) {
   localStorage.setItem(DAILY_SESSION_KEY, JSON.stringify(session));
+  // Sync to server
+  fetch('/api/daily-session', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(session)
+  }).catch(() => {});
+}
+
+async function syncDailySessionFromServer() {
+  try {
+    const res = await fetch('/api/daily-session');
+    const remote = await res.json();
+    if (remote && remote.date) {
+      const local = loadDailySession();
+      // Use remote if no local, or remote is same/newer date with more progress
+      if (!local || !local.date ||
+          (remote.date > local.date) ||
+          (remote.date === local.date && (remote.completedIds || []).length > (local.completedIds || []).length)) {
+        localStorage.setItem(DAILY_SESSION_KEY, JSON.stringify(remote));
+      } else if (local.date > remote.date || (local.date === remote.date && (local.completedIds || []).length > (remote.completedIds || []).length)) {
+        // Local is ahead, push to server
+        fetch('/api/daily-session', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(local)
+        }).catch(() => {});
+      }
+    }
+  } catch {}
 }
 
 function getTodayDailySession() {
@@ -1294,6 +1695,99 @@ function updateDashboard() {
   fillBtn.textContent = noCards ? 'No cards yet' : 'Fill in the Blank';
   if (dailyBtn) dailyBtn.textContent = noDailyEligible ? 'No cards yet' : 'Daily Mode';
   writeBtn.textContent = noDue ? 'Nothing due — come back later' : 'Write a Sentence';
+  renderCalendar();
+}
+
+// ─── Daily Completions ──────────────────────────────────────────────────
+
+function loadDailyCompletions() {
+  try {
+    const raw = localStorage.getItem(DAILY_COMPLETIONS_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function recordDailyCompletion(dateStr) {
+  const completions = loadDailyCompletions();
+  if (completions.has(dateStr)) return;
+  completions.add(dateStr);
+  const arr = [...completions];
+  localStorage.setItem(DAILY_COMPLETIONS_KEY, JSON.stringify(arr));
+  // Sync to server
+  fetch('/api/daily-completions', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(arr)
+  }).catch(() => {});
+}
+
+async function syncDailyCompletionsFromServer() {
+  try {
+    const res = await fetch('/api/daily-completions');
+    const remote = await res.json();
+    if (Array.isArray(remote) && remote.length > 0) {
+      const local = loadDailyCompletions();
+      const merged = new Set([...local, ...remote]);
+      localStorage.setItem(DAILY_COMPLETIONS_KEY, JSON.stringify([...merged]));
+      // Push merged back if local had extras
+      if (merged.size > remote.length) {
+        fetch('/api/daily-completions', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([...merged])
+        }).catch(() => {});
+      }
+    }
+  } catch {}
+}
+
+function renderCalendar() {
+  const completions = loadDailyCompletions();
+  const today = getToday();
+  const MONTHS = ['January','February','March','April','May','June',
+    'July','August','September','October','November','December'];
+  const DAY_NAMES = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+  document.getElementById('cal-title').textContent =
+    `${MONTHS[calendarMonth]} ${calendarYear}`;
+
+  const firstDow = new Date(calendarYear, calendarMonth, 1).getDay();
+  const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+
+  let html = DAY_NAMES.map(d => `<div class="cal-day-name">${d}</div>`).join('');
+
+  for (let i = 0; i < firstDow; i++) {
+    html += `<div class="cal-day"></div>`;
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const mm = String(calendarMonth + 1).padStart(2, '0');
+    const dd = String(day).padStart(2, '0');
+    const dateStr = `${calendarYear}-${mm}-${dd}`;
+    const isToday = dateStr === today;
+    const isDone = completions.has(dateStr);
+    const classes = ['cal-day', 'in-month', isToday && 'today', isDone && 'completed']
+      .filter(Boolean).join(' ');
+    html += `<div class="${classes}"><span>${day}</span><span class="cal-star">⭐</span></div>`;
+  }
+
+  document.getElementById('cal-grid').innerHTML = html;
+}
+
+function calendarPrevMonth() {
+  calendarMonth--;
+  if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; }
+  renderCalendar();
+}
+
+function calendarNextMonth() {
+  calendarMonth++;
+  if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; }
+  renderCalendar();
 }
 
 // ─── Review ─────────────────────────────────────────────────────────────
@@ -1543,6 +2037,7 @@ function showCurrentCard() {
   document.getElementById('card-source').textContent = card.source || '';
 
   // Hide answer and reset UI
+  document.getElementById('card-blank-sentence').style.display = 'none';
   document.getElementById('card-meaning').style.display = 'none';
   document.getElementById('card-example').style.display = 'none';
   document.getElementById('card-divider').style.display = 'none';
@@ -1687,6 +2182,7 @@ async function showFillBlank() {
     const expectedAnswer = (data.answer || card.phrase || '').trim();
     currentBlankData = {
       sentence: data.sentence,
+      fullSentence: data.fullSentence || '',
       hint: data.hint,
       answer: expectedAnswer,
       answerCategory: data.answerCategory || (expectedAnswer.split(/\s+/).length > 1 ? 'phrase' : 'word'),
@@ -1710,6 +2206,40 @@ async function showFillBlank() {
   }
 }
 
+function showFilledSentence() {
+  const el = document.getElementById('card-blank-sentence');
+  if (!currentBlankData || !currentBlankData.sentence) {
+    el.style.display = 'none';
+    return;
+  }
+  const card = reviewQueue[reviewIndex];
+  const phrase = card.phrase;
+
+  // Use the original full sentence if available, highlighting the phrase
+  if (currentBlankData.fullSentence) {
+    const escaped = escapeHtml(currentBlankData.fullSentence);
+    const pattern = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const match = currentBlankData.fullSentence.match(pattern);
+    if (match) {
+      const highlighted = escaped.replace(
+        new RegExp(match[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
+        `<span class="answer-highlight">${escapeHtml(match[0])}</span>`
+      );
+      el.innerHTML = `"${highlighted}"`;
+    } else {
+      el.innerHTML = `"${escaped}"`;
+    }
+  } else {
+    // Fallback: replace blanks with the answer
+    const filled = currentBlankData.sentence.replace(
+      /_____/g,
+      `<span class="answer-highlight">${escapeHtml(currentBlankData.answer)}</span>`
+    );
+    el.innerHTML = `"${filled}"`;
+  }
+  el.style.display = 'block';
+}
+
 async function submitBlankAnswer() {
   const userAnswer = document.getElementById('blank-answer').value.trim();
   if (!currentBlankData) return;
@@ -1730,6 +2260,7 @@ async function submitBlankAnswer() {
     document.getElementById('card-phrase').style.display = '';
     document.getElementById('card-category').style.display = '';
     answerRevealed = true;
+    showFilledSentence();
     document.getElementById('card-meaning').style.display = 'block';
     document.getElementById('card-example').style.display = 'block';
     document.getElementById('card-divider').style.display = 'block';
@@ -1770,7 +2301,10 @@ async function submitBlankAnswer() {
     document.getElementById('feedback-verdict').textContent =
       result.verdict === 'correct' ? 'Correct!' :
       result.verdict === 'partial' ? 'Close!' : 'Not quite';
-    document.getElementById('feedback-explanation').textContent = result.explanation;
+    const correctLine = result.verdict !== 'correct'
+      ? `\nCorrect answer: ${currentBlankData.answer}\n\n${result.explanation}`
+      : result.explanation;
+    document.getElementById('feedback-explanation').textContent = correctLine;
 
     // Hide fill-blank section, reveal the card
     document.getElementById('fill-blank-section').classList.remove('visible');
@@ -1779,6 +2313,7 @@ async function submitBlankAnswer() {
     document.getElementById('card-phrase').style.display = '';
     document.getElementById('card-category').style.display = '';
     answerRevealed = true;
+    showFilledSentence();
     document.getElementById('card-meaning').style.display = 'block';
     document.getElementById('card-example').style.display = 'block';
     document.getElementById('card-divider').style.display = 'block';
@@ -1872,6 +2407,8 @@ function editCurrentCard() {
   // Navigate to edit screen with a flag to return to review
   editingCardId = card.id;
   document.getElementById('form-title').textContent = 'Edit Card';
+  document.getElementById('edit-form-fields').style.display = 'block';
+  document.getElementById('quick-add-section').style.display = 'none';
   document.getElementById('input-phrase').value = card.phrase;
   document.getElementById('input-meaning').value = card.meaning;
   document.getElementById('input-example').value = card.example;
@@ -1962,6 +2499,18 @@ function showSummary(options = {}) {
     title.textContent = 'Amazing work today!';
     subtitle.textContent = "You finished today's Daily Mode set.";
     subtitle.style.display = 'block';
+
+    // Record completion if all queued cards are done
+    const finishedSession = getTodayDailySession();
+    if (
+      finishedSession &&
+      Array.isArray(finishedSession.completedIds) &&
+      Array.isArray(finishedSession.queueIds) &&
+      finishedSession.queueIds.length > 0 &&
+      finishedSession.completedIds.length >= finishedSession.queueIds.length
+    ) {
+      recordDailyCompletion(finishedSession.date);
+    }
   } else {
     headerTitle.textContent = 'Session Complete';
     title.textContent = 'Nice work!';
@@ -2017,12 +2566,9 @@ function renderBrowseList() {
     );
   }
 
-  // Sort: due first, then by next review date
+  // Sort: newest added first
   filtered.sort((a, b) => {
-    const aDue = a.nextReview <= today ? 0 : 1;
-    const bDue = b.nextReview <= today ? 0 : 1;
-    if (aDue !== bDue) return aDue - bDue;
-    return a.nextReview.localeCompare(b.nextReview);
+    return (b.createdAt || '').localeCompare(a.createdAt || '');
   });
 
   if (filtered.length === 0) {
@@ -2064,13 +2610,10 @@ let editingFromReview = false;
 function showAddForm() {
   editingCardId = null;
   editingFromReview = false;
-  document.getElementById('form-title').textContent = 'Add Card';
-  document.getElementById('input-phrase').value = '';
-  document.getElementById('input-meaning').value = '';
-  document.getElementById('input-example').value = '';
-  document.getElementById('input-category').value = 'idiom';
-  document.getElementById('input-bucket').value = '';
-  document.getElementById('delete-card-btn').style.display = 'none';
+  document.getElementById('form-title').textContent = 'Add Cards';
+  document.getElementById('edit-form-fields').style.display = 'none';
+  document.getElementById('quick-add-section').style.display = 'block';
+  quickAddReset();
   showScreen('add-edit');
 }
 
@@ -2081,6 +2624,8 @@ function editCard(id) {
   editingCardId = id;
   editingFromReview = false;
   document.getElementById('form-title').textContent = 'Edit Card';
+  document.getElementById('edit-form-fields').style.display = 'block';
+  document.getElementById('quick-add-section').style.display = 'none';
   document.getElementById('input-phrase').value = card.phrase;
   document.getElementById('input-meaning').value = card.meaning;
   document.getElementById('input-example').value = card.example;
@@ -2172,6 +2717,441 @@ function cancelEdit() {
   } else {
     showScreen(editingCardId ? 'browse' : 'dashboard');
   }
+}
+
+// ─── Look Up ─────────────────────────────────────────────────────────────
+
+let lookupData = null;
+
+function showLookup() {
+  document.getElementById('lookup-input').value = '';
+  document.getElementById('lookup-result').style.display = 'none';
+  lookupData = null;
+  showScreen('lookup');
+  document.getElementById('lookup-input').focus();
+}
+
+async function doLookup() {
+  const input = document.getElementById('lookup-input');
+  const phrase = input.value.trim();
+  if (!phrase) { showToast('Type a word first'); return; }
+
+  const btn = document.getElementById('lookup-btn');
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try {
+    const response = await fetch('/api/batch-enrich', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phrases: [phrase] })
+    });
+
+    if (!response.ok) throw new Error('Lookup failed');
+    const { results } = await response.json();
+    if (!results || results.length === 0) throw new Error('No result');
+
+    lookupData = results[0];
+    const isDupe = cards.some(c => c.phrase.toLowerCase() === lookupData.phrase.toLowerCase());
+
+    document.getElementById('lookup-phrase').textContent = lookupData.phrase;
+    document.getElementById('lookup-category').textContent = lookupData.category;
+    document.getElementById('lookup-meaning').textContent = lookupData.meaning;
+    document.getElementById('lookup-example').textContent = lookupData.example;
+
+    const dupeTag = document.getElementById('lookup-dupe');
+    const addBtn = document.getElementById('lookup-add-btn');
+    if (isDupe) {
+      dupeTag.style.display = 'inline';
+      addBtn.textContent = 'Already in Deck';
+      addBtn.disabled = true;
+      addBtn.style.opacity = '0.5';
+    } else {
+      dupeTag.style.display = 'none';
+      addBtn.textContent = 'Add to Deck';
+      addBtn.disabled = false;
+      addBtn.style.opacity = '1';
+    }
+
+    document.getElementById('lookup-result').style.display = 'block';
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Look Up';
+  }
+}
+
+async function lookupRegenExample() {
+  if (!lookupData) return;
+  const btn = document.querySelector('#lookup-card .regen-btn');
+  const exEl = document.getElementById('lookup-example');
+  btn.disabled = true;
+  btn.textContent = '...';
+  exEl.textContent = 'Generating...';
+
+  try {
+    const response = await fetch('/api/generate-example', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phrase: lookupData.phrase, meaning: lookupData.meaning })
+    });
+    if (!response.ok) throw new Error('Failed');
+    const { example } = await response.json();
+    lookupData.example = example;
+    exEl.textContent = example;
+  } catch (err) {
+    exEl.textContent = lookupData.example || 'Error';
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↻ New example';
+  }
+}
+
+async function lookupAddCard() {
+  if (!lookupData) return;
+  const today = getToday();
+  const now = new Date().toISOString();
+
+  cards.unshift({
+    id: generateId(),
+    phrase: lookupData.phrase,
+    meaning: lookupData.meaning || '',
+    example: lookupData.example || '',
+    category: lookupData.category || 'word',
+    bucket: undefined,
+    createdAt: now,
+    source: 'Look Up',
+    easeFactor: 2.5,
+    interval: 0,
+    repetitions: 0,
+    nextReview: today,
+    lastReview: null
+  });
+
+  await saveCards(cards);
+  updateDashboard();
+  showToast(`Added "${lookupData.phrase}" to deck`);
+
+  // Update button to show it's added
+  const addBtn = document.getElementById('lookup-add-btn');
+  addBtn.textContent = 'Added!';
+  addBtn.disabled = true;
+  addBtn.style.opacity = '0.5';
+  document.getElementById('lookup-dupe').style.display = 'inline';
+
+  // Clear input so they can look up another
+  document.getElementById('lookup-input').value = '';
+  document.getElementById('lookup-input').focus();
+}
+
+// Allow Enter key to trigger lookup
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && document.activeElement?.id === 'lookup-input') {
+    e.preventDefault();
+    doLookup();
+  }
+});
+
+// ─── Verify a Phrase ─────────────────────────────────────────────────────
+
+let verifyData = null;
+
+function showVerify() {
+  document.getElementById('verify-phrase').value = '';
+  document.getElementById('verify-sentence').value = '';
+  document.getElementById('verify-result').style.display = 'none';
+  verifyData = null;
+  showScreen('verify');
+  document.getElementById('verify-phrase').focus();
+}
+
+async function doVerify() {
+  const phrase = document.getElementById('verify-phrase').value.trim();
+  const sentence = document.getElementById('verify-sentence').value.trim();
+
+  if (!phrase) { showToast('Enter the phrase first'); return; }
+  if (!sentence) { showToast('Write a sentence using the phrase'); return; }
+
+  const btn = document.getElementById('verify-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span>Checking...';
+
+  try {
+    // First get the phrase meaning (for context and potential add-to-deck)
+    const enrichRes = await fetch('/api/batch-enrich', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phrases: [phrase] })
+    });
+    if (!enrichRes.ok) throw new Error('Failed to look up phrase');
+    const { results: enrichResults } = await enrichRes.json();
+    verifyData = enrichResults[0];
+
+    // Now evaluate the usage
+    const evalRes = await fetch('/api/evaluate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phrase,
+        meaning: verifyData.meaning,
+        userAnswer: sentence
+      })
+    });
+    if (!evalRes.ok) throw new Error('Evaluation failed');
+    const result = await evalRes.json();
+
+    // Display result
+    const resultEl = document.getElementById('verify-result');
+    resultEl.style.display = 'block';
+
+    const verdictEl = document.getElementById('verify-verdict');
+    verdictEl.className = 'verify-verdict ' + result.verdict;
+    verdictEl.textContent =
+      result.verdict === 'correct' ? 'Correct usage!' :
+      result.verdict === 'partial' ? 'Close, but not quite' : 'Incorrect usage';
+
+    // Highlight the phrase in the sentence
+    const sentenceDisplay = document.getElementById('verify-sentence-display');
+    const hlClass = result.verdict === 'correct' ? 'phrase-hl' :
+                    result.verdict === 'partial' ? 'phrase-hl partial' : 'phrase-hl wrong';
+    const escaped = escapeHtml(sentence);
+    const phrasePattern = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const highlighted = escaped.replace(phrasePattern, match =>
+      `<span class="${hlClass}">${match}</span>`
+    );
+    sentenceDisplay.innerHTML = highlighted !== escaped
+      ? highlighted
+      : `${escaped} <span style="color:var(--text-dim); font-size:0.8rem;">(phrase not found in sentence)</span>`;
+
+    document.getElementById('verify-explanation').textContent = result.explanation;
+    document.getElementById('verify-meaning').textContent =
+      `${verifyData.category} — ${verifyData.meaning}`;
+
+    // Show add-to-deck button if not already in deck
+    const isDupe = cards.some(c => c.phrase.toLowerCase() === phrase.toLowerCase());
+    const addBtn = document.getElementById('verify-add-btn');
+    if (isDupe) {
+      addBtn.style.display = 'none';
+    } else {
+      addBtn.style.display = 'block';
+      addBtn.textContent = 'Add to Deck';
+      addBtn.disabled = false;
+    }
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check My Usage';
+  }
+}
+
+async function verifyAddCard() {
+  if (!verifyData) return;
+  const today = getToday();
+  const now = new Date().toISOString();
+
+  cards.unshift({
+    id: generateId(),
+    phrase: verifyData.phrase,
+    meaning: verifyData.meaning || '',
+    example: verifyData.example || '',
+    category: verifyData.category || 'word',
+    bucket: undefined,
+    createdAt: now,
+    source: 'Verify',
+    easeFactor: 2.5,
+    interval: 0,
+    repetitions: 0,
+    nextReview: today,
+    lastReview: null
+  });
+
+  await saveCards(cards);
+  updateDashboard();
+  showToast(`Added "${verifyData.phrase}" to deck`);
+
+  const addBtn = document.getElementById('verify-add-btn');
+  addBtn.textContent = 'Added!';
+  addBtn.disabled = true;
+}
+
+// ─── Quick Add (batch enrich) ────────────────────────────────────────────
+
+let quickAddResults = []; // staged results before confirm
+
+async function quickAddGenerate() {
+  const input = document.getElementById('quick-add-input');
+  const raw = input.value.trim();
+  if (!raw) { showToast('Paste some words first'); return; }
+
+  const phrases = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  if (phrases.length === 0) { showToast('No words found'); return; }
+
+  const existingPhrases = new Set(cards.map(c => c.phrase.toLowerCase()));
+
+  const btn = document.getElementById('quick-add-btn');
+  const progress = document.getElementById('quick-add-progress');
+  const bar = document.getElementById('quick-add-bar');
+  const status = document.getElementById('quick-add-status');
+
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  progress.style.display = 'block';
+  bar.style.width = '0%';
+  status.textContent = `Generating meanings for ${phrases.length} word${phrases.length !== 1 ? 's' : ''}...`;
+
+  try {
+    // Send ALL phrases (including dupes) so we can show them flagged
+    const response = await fetch('/api/batch-enrich', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phrases })
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Server error');
+    }
+
+    bar.style.width = '100%';
+    const { results } = await response.json();
+
+    // Mark duplicates
+    quickAddResults = results.map(r => ({
+      ...r,
+      isDupe: existingPhrases.has(r.phrase.toLowerCase())
+    }));
+
+    // Switch to step 2 (review/edit)
+    document.getElementById('quick-add-step1').style.display = 'none';
+    document.getElementById('quick-add-step2').style.display = 'block';
+    renderQuickAddPreview();
+
+    const dupeCount = quickAddResults.filter(r => r.isDupe).length;
+    const newCount = quickAddResults.length - dupeCount;
+    let msg = `Generated ${newCount} new card${newCount !== 1 ? 's' : ''}`;
+    if (dupeCount > 0) msg += ` · ${dupeCount} duplicate${dupeCount !== 1 ? 's' : ''}`;
+    status.textContent = msg;
+    showToast(msg);
+  } catch (err) {
+    console.error('Quick add error:', err);
+    showToast('Error: ' + err.message);
+    status.textContent = 'Error: ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate';
+    progress.style.display = 'none';
+  }
+}
+
+function renderQuickAddPreview() {
+  const preview = document.getElementById('quick-add-preview');
+  const dupeCount = quickAddResults.filter(r => r.isDupe).length;
+  const newCount = quickAddResults.length - dupeCount;
+
+  // Update confirm button text
+  const confirmBtn = document.getElementById('quick-add-confirm-btn');
+  confirmBtn.textContent = `Add ${newCount} Card${newCount !== 1 ? 's' : ''}`;
+  confirmBtn.disabled = newCount === 0;
+
+  preview.innerHTML = quickAddResults.map((r, i) => `
+    <div class="qa-card ${r.isDupe ? 'is-dupe' : ''}" data-qa-index="${i}">
+      <div class="qa-card-header">
+        <span class="phrase">${escapeHtml(r.phrase)}</span>
+        <span class="tag">${r.category}</span>
+        ${r.isDupe ? '<span class="dupe-tag">already in deck</span>' : ''}
+      </div>
+      <textarea rows="2" onchange="quickAddUpdateMeaning(${i}, this.value)">${escapeHtml(r.meaning)}</textarea>
+      <div class="example-row">
+        <span class="example-text" id="qa-example-${i}">${escapeHtml(r.example)}</span>
+        <button class="regen-btn" onclick="quickAddRegenExample(${i})" id="qa-regen-${i}">↻ New example</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function quickAddUpdateMeaning(index, newMeaning) {
+  quickAddResults[index].meaning = newMeaning;
+}
+
+async function quickAddRegenExample(index) {
+  const item = quickAddResults[index];
+  const btn = document.getElementById(`qa-regen-${index}`);
+  const exampleEl = document.getElementById(`qa-example-${index}`);
+
+  btn.disabled = true;
+  btn.textContent = '...';
+  exampleEl.textContent = 'Generating...';
+
+  try {
+    const response = await fetch('/api/generate-example', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phrase: item.phrase, meaning: item.meaning })
+    });
+
+    if (!response.ok) throw new Error('Failed to generate');
+    const { example } = await response.json();
+    item.example = example;
+    exampleEl.textContent = example;
+  } catch (err) {
+    exampleEl.textContent = item.example || 'Error generating example';
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↻ New example';
+  }
+}
+
+async function quickAddConfirm() {
+  const today = getToday();
+  const now = new Date().toISOString();
+  const existingPhrases = new Set(cards.map(c => c.phrase.toLowerCase()));
+  const newCards = [];
+
+  for (const item of quickAddResults) {
+    if (item.isDupe) continue;
+    if (!item.phrase) continue;
+    if (existingPhrases.has(item.phrase.toLowerCase())) continue;
+    existingPhrases.add(item.phrase.toLowerCase());
+
+    newCards.push({
+      id: generateId(),
+      phrase: item.phrase,
+      meaning: item.meaning || '',
+      example: item.example || '',
+      category: item.category || 'word',
+      bucket: undefined,
+      createdAt: now,
+      source: 'Quick Add',
+      easeFactor: 2.5,
+      interval: 0,
+      repetitions: 0,
+      nextReview: today,
+      lastReview: null
+    });
+  }
+
+  // Insert at beginning so newest cards appear first
+  cards.unshift(...newCards);
+  const added = newCards.length;
+
+  await saveCards(cards);
+  renderBrowseList();
+  updateDashboard();
+  showToast(`Added ${added} card${added !== 1 ? 's' : ''}`);
+  quickAddReset();
+}
+
+function quickAddReset() {
+  quickAddResults = [];
+  document.getElementById('quick-add-input').value = '';
+  document.getElementById('quick-add-step1').style.display = 'block';
+  document.getElementById('quick-add-step2').style.display = 'none';
+  document.getElementById('quick-add-progress').style.display = 'none';
+  document.getElementById('quick-add-preview').innerHTML = '';
 }
 
 // ─── Import ─────────────────────────────────────────────────────────────
@@ -2668,6 +3648,7 @@ async function bootstrapCardsFromCachedSources() {
 (async function initApp() {
   await syncCardsWithServerOnStartup();
   await bootstrapCardsFromCachedSources();
+  await Promise.all([syncDailySessionFromServer(), syncDailyCompletionsFromServer()]);
   updateDashboard();
 })();
 </script>
