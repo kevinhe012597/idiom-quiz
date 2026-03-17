@@ -811,20 +811,16 @@ function buildContentWordBlank(phrase) {
   }
 
   const contentIndexes = new Set(pickContentIndexes(words));
-  const answerWords = [];
 
-  const blankedWords = words.map((word, idx) => {
-    if (!contentIndexes.has(idx)) return word;
-
-    const { leading, core, trailing } = splitToken(word);
-    answerWords.push(core || word);
-    return `${leading}_____${trailing}`;
-  });
-
-  return {
-    blankedPhrase: blankedWords.join(' '),
-    answer: answerWords.join(' ')
-  };
+  // Find the span from first to last content word and collapse to a single blank
+  const contentIdxList = [...contentIndexes].sort((a, b) => a - b);
+  if (contentIdxList.length === 0) {
+    // Fallback: blank entire phrase
+    return { blankedPhrase: '_____', answer: phrase.trim() };
+  }
+  const spanStart = contentIdxList[0];
+  const spanEnd = contentIdxList[contentIdxList.length - 1];
+  return collapseSpanToBlank(words, spanStart, spanEnd);
 }
 
 function findAnswerSpanInPhraseWords(phraseWords, answerWords) {
