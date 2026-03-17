@@ -2062,10 +2062,18 @@ function goToPreviousCard() {
 }
 
 function returnToCurrentCard() {
-  viewingPrevious = false;
-  reviewIndex = savedReviewIndex;
-  historyBrowseIndex = -1;
-  showCurrentCard();
+  // Step forward through history one at a time
+  if (historyBrowseIndex < reviewHistory.length - 1) {
+    historyBrowseIndex++;
+    reviewIndex = reviewHistory[historyBrowseIndex];
+    showCurrentCard();
+  } else {
+    // Reached end of history — return to current unanswered card
+    viewingPrevious = false;
+    reviewIndex = savedReviewIndex;
+    historyBrowseIndex = -1;
+    showCurrentCard();
+  }
 }
 
 function showCurrentCard() {
