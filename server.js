@@ -40,6 +40,12 @@ if (!NOTION_TOKEN) {
   console.warn('WARNING: NOTION_TOKEN not set. Live Notion sync will be unavailable. Add it to .env file.');
 }
 
+// Ensure DB directory exists
+const dbDir = path.dirname(DB_PATH);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 const db = new DatabaseSync(DB_PATH);
 db.exec(`
 CREATE TABLE IF NOT EXISTS app_state (
