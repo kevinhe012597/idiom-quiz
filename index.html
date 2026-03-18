@@ -1047,6 +1047,14 @@ textarea { resize: vertical; min-height: 80px; }
     <div class="progress-bar-container">
       <div class="progress-bar-fill" id="review-progress-bar"></div>
     </div>
+    <div class="answer-section" id="answer-section">
+      <div class="rating-buttons">
+        <button class="btn-nope" onclick="rateCard(0)">Nope</button>
+        <button class="btn-kinda" onclick="rateCard(3)">Kinda</button>
+        <button class="btn-nailed" onclick="rateCard(5)">Nailed it</button>
+        <button class="btn-skip" onclick="rateCard(-1)">Not Useful</button>
+      </div>
+    </div>
     <div class="review-nav-row" id="review-nav-row" style="display:none;">
       <button class="btn-prev" id="btn-prev" onclick="goToPreviousCard()">&larr; Previous</button>
       <button class="btn-prev" id="btn-continue" onclick="returnToCurrentCard()" style="display:none;">Continue &rarr;</button>
@@ -1085,14 +1093,6 @@ textarea { resize: vertical; min-height: 80px; }
       <div class="your-answer-text" id="feedback-your-answer"></div>
       <div class="verdict" id="feedback-verdict"></div>
       <div class="explanation" id="feedback-explanation"></div>
-    </div>
-    <div class="answer-section" id="answer-section">
-      <div class="rating-buttons">
-        <button class="btn-nope" onclick="rateCard(0)">Nope</button>
-        <button class="btn-kinda" onclick="rateCard(3)">Kinda</button>
-        <button class="btn-nailed" onclick="rateCard(5)">Nailed it</button>
-        <button class="btn-skip" onclick="rateCard(-1)">Not Useful</button>
-      </div>
     </div>
   </div>
 
