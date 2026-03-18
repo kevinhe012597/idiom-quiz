@@ -511,12 +511,12 @@ Only output valid JSON, nothing else.`
 async function generateExample(phrase, meaning) {
   const payload = JSON.stringify({
     model: 'gpt-4o-mini',
-    temperature: 0.7,
+    temperature: 1.2,
     max_tokens: 100,
     messages: [
       {
         role: 'system',
-        content: `Write one short, natural example sentence using the given English word, phrase, or idiom. The sentence should clearly demonstrate the meaning in context. Output ONLY the sentence, nothing else.`
+        content: `Write one short, natural example sentence using the given English word, phrase, or idiom. The sentence should clearly demonstrate the meaning in context. Be creative — vary the setting, characters, and tone each time (e.g. workplace, travel, relationships, sports, cooking, history). Avoid generic or cliché constructions. Output ONLY the sentence, nothing else.`
       },
       {
         role: 'user',
