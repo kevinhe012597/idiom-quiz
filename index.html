@@ -2101,6 +2101,7 @@ function showCurrentCard() {
   document.getElementById('card-source').textContent = card.source || '';
 
   // Hide answer and reset UI
+  document.getElementById('flashcard').style.display = '';
   document.getElementById('card-blank-sentence').style.display = 'none';
   document.getElementById('card-meaning').style.display = 'none';
   document.getElementById('card-example').style.display = 'none';
