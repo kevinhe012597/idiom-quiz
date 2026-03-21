@@ -518,6 +518,19 @@ textarea { resize: vertical; min-height: 80px; }
   border-color: var(--red);
   color: var(--red);
 }
+.btn-refine-review {
+  font-size: 0.8rem;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 8px;
+}
+.refine-feedback-section {
+  margin-bottom: 12px;
+  padding: 12px;
+  background: var(--surface1);
+  border: 1px solid var(--surface2);
+  border-radius: 12px;
+}
 
 .answer-section { display: none; }
 .answer-section.visible { display: block; }
@@ -1086,7 +1099,8 @@ textarea { resize: vertical; min-height: 80px; }
   #review.answer-revealed .flashcard .example { display: none !important; }
   #review.answer-revealed .btn-regen-example { display: none !important; }
   #review.answer-revealed .flashcard .source-badge { display: none !important; }
-  #review.answer-revealed .review-card-actions { display: none !important; }
+  #review.answer-revealed .review-card-actions { margin-bottom: 2px; }
+  #review.answer-revealed .review-card-actions .btn-small { font-size: 0.7rem; padding: 3px 6px; }
   #review.answer-revealed .flashcard .divider { display: none !important; }
   #review.answer-revealed .flashcard .meaning { font-size: 0.85rem; margin-bottom: 2px; }
   #review.answer-revealed .flashcard { padding: 12px; margin-bottom: 4px; }
@@ -1199,6 +1213,12 @@ textarea { resize: vertical; min-height: 80px; }
     <div class="review-card-actions" id="review-card-actions">
       <button class="btn-small btn-edit-review" onclick="editCurrentCard()" title="Edit this card">&#9998; Edit</button>
       <button class="btn-small btn-delete-review" onclick="deleteCurrentCard()" title="Delete this card">&#128465; Delete</button>
+      <button class="btn-small btn-refine-review" onclick="toggleRefineFeedback()" title="Tell us how this word should be used" style="background:var(--accent); color:#fff;">&#128172; Refine</button>
+    </div>
+    <div class="refine-feedback-section" id="refine-feedback-section" style="display:none;">
+      <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">How should this word be presented?</label>
+      <textarea id="refine-input" placeholder='e.g. "I want hound to mean persistently annoying someone, not the dog"' rows="2" style="width:100%; margin-top:6px; padding:10px 12px; border-radius:10px; border:1px solid var(--surface2); background:var(--surface1); color:var(--text); font-size:0.9rem; resize:none; font-family:inherit;"></textarea>
+      <button class="btn-primary" id="refine-btn" onclick="submitRefineFeedback()" style="margin-top:8px; width:100%; font-size:0.85rem; padding:10px;">Update Card with Feedback</button>
     </div>
     <div class="type-answer-section" id="type-answer-section">
       <textarea id="typed-answer" placeholder="Write a sentence using this phrase..." rows="3"></textarea>
@@ -2354,6 +2374,8 @@ function showCurrentCard() {
   document.getElementById('btn-hint').disabled = false;
   document.getElementById('btn-hint').innerHTML = '&#128161; Hint';
   document.getElementById('answer-section').classList.remove('visible');
+  document.getElementById('refine-feedback-section').style.display = 'none';
+  document.getElementById('refine-input').value = '';
   currentBlankData = null;
 
   // Update progress
@@ -2813,6 +2835,65 @@ function editCurrentCard() {
   // Set a flag so we return to review after saving
   editingFromReview = true;
   showScreen('add-edit');
+}
+
+function toggleRefineFeedback() {
+  const section = document.getElementById('refine-feedback-section');
+  if (section.style.display === 'none') {
+    section.style.display = 'block';
+    document.getElementById('refine-input').focus();
+    setTimeout(() => section.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+  } else {
+    section.style.display = 'none';
+  }
+}
+
+async function submitRefineFeedback() {
+  const feedback = document.getElementById('refine-input').value.trim();
+  if (!feedback) { showToast('Type your feedback first'); return; }
+
+  const card = reviewQueue[reviewIndex];
+  if (!card) return;
+
+  const btn = document.getElementById('refine-btn');
+  btn.disabled = true;
+  btn.textContent = 'Updating...';
+
+  try {
+    const response = await apiFetch('/api/refine-card', {
+      phrase: card.phrase,
+      currentMeaning: card.meaning,
+      feedback: feedback
+    });
+
+    if (!response.ok) throw new Error('Refine failed');
+    const result = await response.json();
+
+    // Update card in-place
+    card.meaning = result.meaning;
+    card.example = result.example;
+    if (result.category) card.category = result.category;
+
+    // Update the displayed card
+    document.getElementById('card-meaning').textContent = card.meaning;
+    document.getElementById('card-example').textContent = card.example;
+    document.getElementById('card-category').textContent = card.category;
+
+    // Persist
+    saveCardsToStorage();
+    debouncedServerSync();
+
+    // Hide refine section and show success
+    document.getElementById('refine-feedback-section').style.display = 'none';
+    document.getElementById('refine-input').value = '';
+    showToast('Card updated!');
+
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Update Card with Feedback';
+  }
 }
 
 function rateCard(quality) {

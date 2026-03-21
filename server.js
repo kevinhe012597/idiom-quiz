@@ -397,6 +397,95 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Refine card: re-interpret a word/phrase based on user feedback
+  if (req.method === 'POST' && req.url === '/api/refine-card') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { phrase, currentMeaning, feedback } = _body;
+        if (!phrase || !feedback) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing required fields: phrase, feedback' }));
+          return;
+        }
+
+        const _model = pickModel(_body);
+        const payload = JSON.stringify({
+          model: _model,
+          temperature: 0.3,
+          max_completion_tokens: 500,
+          messages: [
+            {
+              role: 'system',
+              content: `You help refine vocabulary flashcards. The user has a flashcard for an English word/phrase but wants to change how it's defined or used. Based on their feedback, provide an updated definition and example that matches their intended meaning.
+
+Respond with a JSON object with exactly: "meaning" (1-2 sentence definition matching the user's intent), "example" (natural example sentence using the word in the way the user wants), "category" (one of "idiom", "word", or "phrase").
+
+Only output valid JSON, nothing else.`
+            },
+            {
+              role: 'user',
+              content: `Word/phrase: "${phrase}"
+Current meaning: "${currentMeaning || 'none'}"
+User feedback: "${feedback}"
+
+Please redefine this card according to the user's feedback.`
+            }
+          ]
+        });
+
+        const https = require('https');
+        const result = await new Promise((resolve, reject) => {
+          const options = {
+            hostname: 'api.openai.com',
+            path: '/v1/chat/completions',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${OPENAI_API_KEY}`,
+              'Content-Length': Buffer.byteLength(payload),
+            },
+          };
+          const apiReq = https.request(options, (apiRes) => {
+            let data = '';
+            apiRes.on('data', chunk => { data += chunk; });
+            apiRes.on('end', () => {
+              if (apiRes.statusCode !== 200) {
+                reject(new Error(`OpenAI API error: ${apiRes.statusCode} — ${data}`));
+                return;
+              }
+              try {
+                const parsed = JSON.parse(data);
+                const content = parsed.choices[0].message.content.trim();
+                const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+                resolve(JSON.parse(jsonStr));
+              } catch (e) {
+                reject(new Error('Failed to parse refine response'));
+              }
+            });
+          });
+          apiReq.on('error', reject);
+          apiReq.write(payload);
+          apiReq.end();
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          meaning: result.meaning || '',
+          example: result.example || '',
+          category: result.category || 'word'
+        }));
+      } catch (err) {
+        console.error('Refine card error:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   // Batch enrich: takes a list of words/phrases, returns meanings, examples, categories
   if (req.method === 'POST' && req.url === '/api/batch-enrich') {
     let body = '';
