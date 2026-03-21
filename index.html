@@ -292,6 +292,7 @@ textarea { resize: vertical; min-height: 80px; }
   font-weight: 700;
   color: #fff;
 }
+.fill-target-recent { background: linear-gradient(135deg, var(--accent), var(--blue)); }
 .fill-target-new { background: var(--blue); }
 .fill-target-nope { background: var(--red); }
 .fill-target-kinda { background: var(--orange); }
@@ -1462,6 +1463,7 @@ textarea { resize: vertical; min-height: 80px; }
   <div class="fill-target-card">
     <h3>Choose a Fill in the Blank list</h3>
     <div class="fill-target-grid">
+      <button class="fill-target-btn fill-target-recent" onclick="startFillBlank('recent')">Recent (15 days)</button>
       <button class="fill-target-btn fill-target-new" onclick="startFillBlank('new')">New</button>
       <button class="fill-target-btn fill-target-nope" onclick="startFillBlank('nope')">Nope</button>
       <button class="fill-target-btn fill-target-kinda" onclick="startFillBlank('kinda')">Kinda</button>
@@ -2035,12 +2037,22 @@ let historyBrowseIndex = -1; // position within reviewHistory when browsing
 function getCardsByBucket(bucket) {
   if (!bucket) return getDueCards();
   if (bucket === 'new') return cards.filter(c => !c.bucket);
+  if (bucket === 'recent') {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 15);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    return cards.filter(c => {
+      const added = c.createdAt || '';
+      return added >= cutoffStr && (c.bucket || '') !== 'skip';
+    });
+  }
   return cards.filter(c => c.bucket === bucket);
 }
 
 function bucketLabel(bucket) {
   const labels = {
     daily: 'Daily Mode',
+    recent: 'Recent (15 days)',
     new: 'New',
     nope: 'Nope',
     kinda: 'Kinda',
