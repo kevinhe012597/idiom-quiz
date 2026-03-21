@@ -1381,6 +1381,20 @@ function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Build a regex that matches the phrase even when the first word is conjugated
+// e.g. "beat around the bush" also matches "beating around the bush", "beats around the bush"
+function buildInflectedPhrasePattern(phrase) {
+  const words = phrase.trim().split(/\s+/);
+  if (words.length === 0) return new RegExp(escapeRegex(phrase), 'i');
+  // Allow the first word to have common verb suffixes: -s, -es, -ed, -ing, -en, -d
+  // Also handle e-dropping (e.g. "make" → "making") by making trailing 'e' optional
+  const base = words[0].replace(/e$/i, '');
+  const firstWordPattern = escapeRegex(base) + 'e?' + '(?:s|es|ed|d|ing|en|ting)?';
+  const rest = words.slice(1).map(escapeRegex).join('\\s+');
+  const full = rest ? firstWordPattern + '\\s+' + rest : firstWordPattern;
+  return new RegExp(full, 'i');
+}
+
 function sentenceContainsPhrase(sentence, phrase) {
   const safeSentence = (sentence || '').trim();
   if (!safeSentence) return false;
@@ -1392,7 +1406,10 @@ function sentenceContainsPhrase(sentence, phrase) {
     phrase.trim().split(/\s+/).map(escapeRegex).join('\\s+'),
     'i'
   );
-  return flexiblePattern.test(safeSentence);
+  if (flexiblePattern.test(safeSentence)) return true;
+
+  // Try with verb inflection on first word
+  return buildInflectedPhrasePattern(phrase).test(safeSentence);
 }
 
 function replaceTextInSentence(sentence, text, replacement) {
@@ -1432,6 +1449,12 @@ function replacePhraseInSentence(sentence, phrase, replacement) {
   );
   if (flexiblePattern.test(safeSentence)) {
     return safeSentence.replace(flexiblePattern, replacement);
+  }
+
+  // Try with verb inflection on first word (e.g. "beat" → "beating")
+  const inflectedPattern = buildInflectedPhrasePattern(phrase);
+  if (inflectedPattern.test(safeSentence)) {
+    return safeSentence.replace(inflectedPattern, replacement);
   }
 
   // Last resort: append a blank form so user can still answer.
