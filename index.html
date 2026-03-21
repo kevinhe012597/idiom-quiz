@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Lexicon">
 <link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/svg+xml" href="/icon-192.svg">
 <link rel="apple-touch-icon" href="/icon-192.svg">
 <title>Lexicon</title>
 <style>
@@ -164,6 +165,10 @@ textarea { resize: vertical; min-height: 80px; }
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+.dashboard-sidebar {
+  flex: 1;
+  min-width: 0;
 }
 .calendar-widget {
   background: var(--surface);
@@ -360,6 +365,50 @@ textarea { resize: vertical; min-height: 80px; }
   text-align: center;
   margin-bottom: 8px;
 }
+.btn-speak {
+  background: none;
+  border: 1px solid var(--surface2);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 1.1rem;
+  cursor: pointer;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 8px;
+  transition: background 0.2s, color 0.2s;
+}
+.btn-speak:hover { background: var(--surface2); color: var(--accent2); }
+.btn-speak.playing { color: var(--accent2); background: rgba(59, 130, 246, 0.1); }
+.btn-speak-inline {
+  display: inline-flex;
+  margin: 0 4px;
+  vertical-align: middle;
+  width: 28px;
+  height: 28px;
+  font-size: 0.9rem;
+}
+.btn-add-word {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.btn-add-word:disabled { opacity: 0.4; cursor: not-allowed; }
 .flashcard .category-badge {
   font-size: 0.75rem;
   text-transform: uppercase;
@@ -971,22 +1020,79 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .toast.show { transform: translateX(-50%) translateY(0); }
 
-@media (max-width: 480px) {
-  .container { padding: 16px; }
-  h1 { font-size: 1.4rem; }
-  .flashcard { min-height: 220px; padding: 28px 20px; }
-  .flashcard .phrase { font-size: 1.4rem; }
-  .stats-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .bucket-grid { grid-template-columns: repeat(3, 1fr); }
+#swipe-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
+  z-index: 100;
+}
+#swipe-label {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+@media (max-width: 768px) {
   .dashboard-bottom { flex-direction: column; }
+  .dashboard-actions { width: 100%; }
+  .dashboard-actions button { width: 100%; }
   .progress-tracker { width: 100%; }
+  .dashboard-sidebar { width: 100%; }
+}
+@media (max-width: 480px) {
+  .container { padding: 12px; }
+  h1 { font-size: 1.4rem; }
+  .flashcard { min-height: auto; padding: 16px 14px; margin-bottom: 8px; }
+  .flashcard .phrase { font-size: 1.2rem; margin-bottom: 4px; }
+  .flashcard .meaning { font-size: 0.9rem; margin-bottom: 6px; }
+  .flashcard .example { font-size: 0.8rem; }
+  .flashcard .blank-sentence-reveal { font-size: 0.85rem; margin-bottom: 6px; }
+  .flashcard .divider { margin: 8px 0; }
+  .btn-speak { width: 30px; height: 30px; font-size: 0.8rem; }
+  .btn-regen-example { font-size: 0.75rem; padding: 4px 8px; margin-top: 4px; }
+  #review .header { margin-bottom: 4px; }
+  #review .header h2 { font-size: 1.2rem; }
+  .progress-text { font-size: 0.8rem; margin: 2px 0; }
+  .progress-bar-container { margin-bottom: 6px; }
+  .rating-buttons { grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .rating-buttons button { padding: 8px 2px; font-size: 0.75rem; }
+  .answer-section { margin-bottom: 4px; }
+  .review-nav-row { margin-bottom: 4px; }
+  .review-card-actions { margin-bottom: 4px; }
+  .review-card-actions .btn-small { font-size: 0.75rem; padding: 4px 8px; }
+  .llm-feedback { padding: 12px; margin-bottom: 8px; }
+  .llm-feedback .verdict { font-size: 0.95rem; margin-bottom: 4px; }
+  .llm-feedback .explanation { font-size: 0.8rem; }
+  .llm-feedback .your-answer-text { font-size: 0.85rem; }
+  .source-badge { font-size: 0.65rem !important; margin-top: 4px !important; }
+  .stats-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .bucket-grid { grid-template-columns: repeat(5, 1fr); gap: 4px; }
+  .bucket-grid .stat-card { padding: 8px 2px; }
+  .bucket-grid .stat-card .number { font-size: 1.1rem; }
+  .bucket-grid .stat-card .label { font-size: 0.55rem; letter-spacing: 0; }
   .stat-card { padding: 14px 8px; }
   .stat-card .number { font-size: 1.5rem; }
-  .rating-buttons { grid-template-columns: repeat(4, 1fr); gap: 6px; }
-  .rating-buttons button { padding: 12px 4px; font-size: 0.8rem; }
   .fill-target-grid { grid-template-columns: 1fr; }
   .review-mode-buttons { grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
   .review-mode-buttons button { padding: 12px 6px; font-size: 0.8rem; }
+  /* Compact answer-reveal: hide non-essential elements to fit on one screen */
+  #review.answer-revealed .flashcard .example { display: none !important; }
+  #review.answer-revealed .btn-regen-example { display: none !important; }
+  #review.answer-revealed .flashcard .source-badge { display: none !important; }
+  #review.answer-revealed .review-card-actions { display: none !important; }
+  #review.answer-revealed .flashcard .divider { display: none !important; }
+  #review.answer-revealed .flashcard .meaning { font-size: 0.85rem; margin-bottom: 2px; }
+  #review.answer-revealed .flashcard { padding: 12px; margin-bottom: 4px; }
+  #review.answer-revealed .flashcard .phrase { font-size: 1.1rem; margin-bottom: 2px; }
+  #review.answer-revealed .btn-speak { width: 26px; height: 26px; font-size: 0.7rem; }
+  #review.answer-revealed .llm-feedback { padding: 10px; margin-bottom: 4px; }
+  #review.answer-revealed .rating-buttons button { padding: 6px 2px; }
 }
 </style>
 </head>
@@ -1030,14 +1136,26 @@ textarea { resize: vertical; min-height: 80px; }
         <button class="btn-secondary" onclick="showLookup()">Look Up a Word</button>
         <button class="btn-secondary" onclick="showVerify()">Verify a Phrase</button>
       </div>
-      <div class="calendar-widget progress-tracker" id="daily-calendar">
-        <div class="progress-tracker-label">Progress Tracker</div>
-        <div class="calendar-header">
-          <button class="cal-nav" onclick="calendarPrevMonth()">&#8249;</button>
-          <span class="cal-title" id="cal-title"></span>
-          <button class="cal-nav" onclick="calendarNextMonth()">&#8250;</button>
+      <div class="dashboard-sidebar">
+        <div class="calendar-widget progress-tracker" id="daily-calendar">
+          <div class="progress-tracker-label">Progress Tracker</div>
+          <div class="calendar-header">
+            <button class="cal-nav" onclick="calendarPrevMonth()">&#8249;</button>
+            <span class="cal-title" id="cal-title"></span>
+            <button class="cal-nav" onclick="calendarNextMonth()">&#8250;</button>
+          </div>
+          <div class="calendar-grid" id="cal-grid"></div>
         </div>
-        <div class="calendar-grid" id="cal-grid"></div>
+        <div style="margin-top:16px; padding:12px; background:var(--surface1); border-radius:12px;">
+          <label style="font-size:0.75rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">AI Model</label>
+          <select id="model-select" onchange="saveModelChoice()" style="width:100%; margin-top:6px; padding:10px; border-radius:8px; border:1px solid var(--surface2); background:var(--bg); font-size:0.9rem; color:var(--text);">
+            <option value="gpt-4o-mini">GPT-4o Mini (fast & cheap)</option>
+            <option value="gpt-5.4-nano">GPT-5.4 Nano (fastest)</option>
+            <option value="gpt-5.4-mini">GPT-5.4 Mini (balanced)</option>
+            <option value="gpt-5.4">GPT-5.4 (powerful)</option>
+            <option value="gpt-5.4-pro">GPT-5.4 Pro (most powerful)</option>
+          </select>
+        </div>
       </div>
     </div>
   </div>
@@ -1068,6 +1186,7 @@ textarea { resize: vertical; min-height: 80px; }
     <div class="flashcard" id="flashcard" onclick="onFlashcardTap()">
       <div class="category-badge" id="card-category"></div>
       <div class="phrase" id="card-phrase"></div>
+      <button class="btn-speak" id="btn-speak" onclick="speakPhrase(event)" title="Hear pronunciation">&#128264;</button>
       <div class="tap-hint" id="tap-hint">Tap to reveal</div>
       <div class="blank-sentence-reveal" id="card-blank-sentence" style="display:none"></div>
       <div class="divider" id="card-divider" style="display:none"></div>
@@ -1237,6 +1356,7 @@ textarea { resize: vertical; min-height: 80px; }
     <h2>Look Up</h2>
     <div></div>
   </div>
+  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Look up a specific word</label>
   <div class="lookup-input-row">
     <input type="text" id="lookup-input" placeholder="Type a word or phrase..." autocomplete="off">
     <button class="btn-primary" id="lookup-btn" onclick="doLookup()">Look Up</button>
@@ -1245,6 +1365,7 @@ textarea { resize: vertical; min-height: 80px; }
     <div class="qa-card" id="lookup-card">
       <div class="qa-card-header">
         <span class="phrase" id="lookup-phrase"></span>
+        <button class="btn-speak btn-speak-inline" onclick="speakText(this, document.getElementById('lookup-phrase').textContent)" title="Hear pronunciation">&#128264;</button>
         <span class="tag" id="lookup-category"></span>
         <span class="dupe-tag" id="lookup-dupe" style="display:none;">already in deck</span>
       </div>
@@ -1259,6 +1380,41 @@ textarea { resize: vertical; min-height: 80px; }
     </div>
     <button class="btn-primary" id="lookup-add-btn" onclick="lookupAddCard()" style="margin-top:12px; width:100%;">Add to Deck</button>
   </div>
+
+  <div style="border-top:1px solid var(--surface2); margin:20px 0;"></div>
+
+  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Translate Chinese → English</label>
+  <div class="lookup-input-row" style="margin-top:8px;">
+    <input type="text" id="translate-input" placeholder="输入中文..." autocomplete="off">
+    <button class="btn-primary" id="translate-btn" onclick="doTranslate()">Translate</button>
+  </div>
+  <div id="translate-result" style="display:none;"></div>
+
+  <div style="border-top:1px solid var(--surface2); margin:20px 0;"></div>
+
+  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Describe what you mean</label>
+  <div class="lookup-input-row">
+    <input type="text" id="reverse-input" placeholder="e.g. People who approve things without doing the real work..." autocomplete="off">
+    <button class="btn-primary" id="reverse-btn" onclick="doReverseLookup()">Find</button>
+  </div>
+  <div id="reverse-results" style="display:none;"></div>
+
+  <div style="border-top:1px solid var(--surface2); margin:20px 0;"></div>
+
+  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Check my word choice</label>
+  <textarea id="critique-sentence" placeholder="Type your sentence here..." rows="2" style="margin-top:8px;"></textarea>
+  <div class="lookup-input-row" style="margin-top:8px;">
+    <input type="text" id="critique-word" placeholder="Which word are you unsure about?" autocomplete="off">
+    <button class="btn-primary" id="critique-btn" onclick="doCritique()">Check</button>
+  </div>
+  <div id="critique-result" style="display:none;"></div>
+
+  <div style="border-top:1px solid var(--surface2); margin:20px 0;"></div>
+
+  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Polish my sentence</label>
+  <textarea id="polish-input" placeholder="Type a rough sentence and I'll refine it..." rows="3" style="margin-top:8px;"></textarea>
+  <button class="btn-primary" id="polish-btn" onclick="doPolish()" style="margin-top:8px; width:100%;">Polish</button>
+  <div id="polish-result" style="display:none;"></div>
 </div>
 
 <!-- Verify a Phrase Screen -->
@@ -1343,6 +1499,28 @@ const SAMPLE_DATA = [
   { phrase: "The devil is in the details", meaning: "Small things in plans and schemes that are overlooked can cause serious problems later", example: "The contract looks fine, but the devil is in the details.", category: "phrase" },
   { phrase: "Actions speak louder than words", meaning: "What someone does is more important than what they say", example: "He keeps promising to help, but actions speak louder than words.", category: "phrase" },
 ];
+
+// ─── Model Selection ─────────────────────────────────────────────────────
+function getSelectedModel() {
+  return localStorage.getItem('lexicon-model') || 'gpt-5.4-mini';
+}
+function saveModelChoice() {
+  const model = document.getElementById('model-select').value;
+  localStorage.setItem('lexicon-model', model);
+}
+function initModelSelect() {
+  const sel = document.getElementById('model-select');
+  if (sel) sel.value = getSelectedModel();
+}
+// Helper: fetch API with model injected into JSON body
+function apiFetch(url, bodyObj) {
+  bodyObj.model = getSelectedModel();
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(bodyObj)
+  });
+}
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -1491,6 +1669,7 @@ async function syncCardsWithServerOnStartup() {
 }
 
 let cards = loadCards();
+initModelSelect();
 
 let calendarYear = new Date().getFullYear();
 let calendarMonth = new Date().getMonth(); // 0-indexed
@@ -1728,25 +1907,29 @@ function updateDashboard() {
 function loadDailyCompletions() {
   try {
     const raw = localStorage.getItem(DAILY_COMPLETIONS_KEY);
-    if (!raw) return new Set();
-    const arr = JSON.parse(raw);
-    return new Set(Array.isArray(arr) ? arr : []);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    // Backward compat: old format was array of date strings
+    if (Array.isArray(parsed)) {
+      const obj = {};
+      parsed.forEach(d => { obj[d] = 1; });
+      return obj;
+    }
+    return (typeof parsed === 'object' && parsed !== null) ? parsed : {};
   } catch {
-    return new Set();
+    return {};
   }
 }
 
 function recordDailyCompletion(dateStr) {
   const completions = loadDailyCompletions();
-  if (completions.has(dateStr)) return;
-  completions.add(dateStr);
-  const arr = [...completions];
-  localStorage.setItem(DAILY_COMPLETIONS_KEY, JSON.stringify(arr));
+  completions[dateStr] = (completions[dateStr] || 0) + 1;
+  localStorage.setItem(DAILY_COMPLETIONS_KEY, JSON.stringify(completions));
   // Sync to server
   fetch('/api/daily-completions', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(arr)
+    body: JSON.stringify(completions)
   }).catch(() => {});
 }
 
@@ -1754,16 +1937,26 @@ async function syncDailyCompletionsFromServer() {
   try {
     const res = await fetch('/api/daily-completions');
     const remote = await res.json();
-    if (Array.isArray(remote) && remote.length > 0) {
+    if (remote && typeof remote === 'object') {
       const local = loadDailyCompletions();
-      const merged = new Set([...local, ...remote]);
-      localStorage.setItem(DAILY_COMPLETIONS_KEY, JSON.stringify([...merged]));
-      // Push merged back if local had extras
-      if (merged.size > remote.length) {
+      // Normalize: if remote is old array format, convert
+      let remoteObj = remote;
+      if (Array.isArray(remote)) {
+        remoteObj = {};
+        remote.forEach(d => { remoteObj[d] = 1; });
+      }
+      // Merge: take the max count for each date
+      const merged = { ...remoteObj };
+      for (const [date, count] of Object.entries(local)) {
+        merged[date] = Math.max(merged[date] || 0, count);
+      }
+      localStorage.setItem(DAILY_COMPLETIONS_KEY, JSON.stringify(merged));
+      // Push merged back if different
+      if (JSON.stringify(merged) !== JSON.stringify(remoteObj)) {
         fetch('/api/daily-completions', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([...merged])
+          body: JSON.stringify(merged)
         }).catch(() => {});
       }
     }
@@ -1794,10 +1987,12 @@ function renderCalendar() {
     const dd = String(day).padStart(2, '0');
     const dateStr = `${calendarYear}-${mm}-${dd}`;
     const isToday = dateStr === today;
-    const isDone = completions.has(dateStr);
+    const count = completions[dateStr] || 0;
+    const isDone = count > 0;
+    const stars = '⭐'.repeat(Math.min(count, 5));
     const classes = ['cal-day', 'in-month', isToday && 'today', isDone && 'completed']
       .filter(Boolean).join(' ');
-    html += `<div class="${classes}"><span>${day}</span><span class="cal-star">⭐</span></div>`;
+    html += `<div class="${classes}"><span>${day}</span><span class="cal-star">${stars}</span></div>`;
   }
 
   document.getElementById('cal-grid').innerHTML = html;
@@ -2002,6 +2197,9 @@ function startFillBlank(bucket) {
     return;
   }
   reviewIndex = 0;
+  blankCache.clear();
+  // Preload first few cards immediately
+  for (let i = 0; i < Math.min(3, reviewQueue.length); i++) preloadBlank(reviewQueue[i]);
   sessionStats = { reviewed: 0, goodOrBetter: 0 };
   showScreen('review');
   showCurrentCard();
@@ -2015,6 +2213,12 @@ function startDailyMode() {
     dailySession = createTodayDailySession(30);
   }
   reviewQueue = getDailyRemainingCards(dailySession);
+
+  // If current round is complete, start a new round
+  if (reviewQueue.length === 0 && dailySession.completedIds.length > 0) {
+    dailySession = createTodayDailySession(30);
+    reviewQueue = getDailyRemainingCards(dailySession);
+  }
   closeFillBlankTargetDialog();
 
   if (reviewQueue.length === 0) {
@@ -2031,6 +2235,9 @@ function startDailyMode() {
   }
 
   reviewIndex = 0;
+  blankCache.clear();
+  // Preload first few cards immediately
+  for (let i = 0; i < Math.min(3, reviewQueue.length); i++) preloadBlank(reviewQueue[i]);
   sessionStats = {
     reviewed: (dailySession.completedIds || []).length,
     goodOrBetter: dailySession.goodOrBetter || 0
@@ -2099,6 +2306,7 @@ function showCurrentCard() {
 
   const card = reviewQueue[reviewIndex];
   answerRevealed = false;
+  document.getElementById('review').classList.remove('answer-revealed');
 
   document.getElementById('card-category').textContent = card.category;
   document.getElementById('card-phrase').textContent = card.phrase;
@@ -2176,6 +2384,7 @@ function onFlashcardTap() {
 function revealAnswer() {
   if (answerRevealed) return;
   answerRevealed = true;
+  document.getElementById('review').classList.add('answer-revealed');
 
   const card = reviewQueue[reviewIndex];
 
@@ -2194,6 +2403,64 @@ function revealAnswer() {
   }
 }
 
+let ttsAudio = null;
+async function speakText(btn, text) {
+  if (!text) return;
+
+  // If already playing, stop
+  if (ttsAudio && !ttsAudio.paused) {
+    ttsAudio.pause();
+    ttsAudio = null;
+    btn.classList.remove('playing');
+    return;
+  }
+
+  btn.classList.add('playing');
+  btn.textContent = '⏳';
+
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    if (!res.ok) throw new Error('TTS failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    ttsAudio = new Audio();
+    ttsAudio.preload = 'auto';
+    ttsAudio.onended = () => {
+      btn.classList.remove('playing');
+      btn.textContent = '🔈';
+      URL.revokeObjectURL(url);
+    };
+    // Set src and wait for full decode before playing (fixes iOS Safari clipping)
+    ttsAudio.src = url;
+    await new Promise((resolve, reject) => {
+      ttsAudio.oncanplaythrough = resolve;
+      ttsAudio.onerror = reject;
+      ttsAudio.load();
+    });
+    // Extra safety: small delay to let iOS audio pipeline settle
+    await new Promise(r => setTimeout(r, 80));
+    await ttsAudio.play();
+    btn.textContent = '🔊';
+  } catch {
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'en-US';
+    utter.onend = () => { btn.classList.remove('playing'); btn.textContent = '🔈'; };
+    speechSynthesis.speak(utter);
+    btn.textContent = '🔊';
+  }
+}
+
+function speakPhrase(event) {
+  if (event) event.stopPropagation();
+  const btn = document.getElementById('btn-speak');
+  const phrase = document.getElementById('card-phrase').textContent;
+  speakText(btn, phrase);
+}
+
 async function regenerateExample(event) {
   if (event) event.stopPropagation(); // Don't trigger flashcard click
   const card = reviewQueue[reviewIndex];
@@ -2207,11 +2474,7 @@ async function regenerateExample(event) {
   exEl.style.opacity = '0.5';
 
   try {
-    const response = await fetch('/api/generate-example', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phrase: card.phrase, meaning: card.meaning })
-    });
+    const response = await apiFetch('/api/generate-example', { phrase: card.phrase, meaning: card.meaning });
 
     if (!response.ok) throw new Error('Failed');
 
@@ -2237,6 +2500,26 @@ async function regenerateExample(event) {
 
 // ─── Fill in the Blank Mode ─────────────────────────────────────────────
 
+// ─── Blank preload cache ───
+const blankCache = new Map(); // cardId -> Promise<blankData>
+
+function preloadBlank(card) {
+  if (!card || blankCache.has(card.id)) return;
+  const promise = apiFetch('/api/generate-blank', { phrase: card.phrase, meaning: card.meaning }
+  ).then(r => {
+    if (!r.ok) throw new Error('Failed to generate');
+    return r.json();
+  });
+  blankCache.set(card.id, promise);
+}
+
+function preloadUpcoming() {
+  for (let i = 1; i <= 3; i++) {
+    const idx = reviewIndex + i;
+    if (idx < reviewQueue.length) preloadBlank(reviewQueue[idx]);
+  }
+}
+
 async function showFillBlank() {
   document.getElementById('flashcard').style.display = 'none';
   document.getElementById('review-card-actions').style.display = 'none';
@@ -2260,15 +2543,11 @@ async function showFillBlank() {
   submitBtn.disabled = true;
 
   try {
-    const response = await fetch('/api/generate-blank', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phrase: card.phrase, meaning: card.meaning })
-    });
+    // Use cached blank if available, otherwise fetch
+    if (!blankCache.has(card.id)) preloadBlank(card);
+    const data = await blankCache.get(card.id);
+    blankCache.delete(card.id); // free memory
 
-    if (!response.ok) throw new Error('Failed to generate');
-
-    const data = await response.json();
     const expectedAnswer = (data.answer || card.phrase || '').trim();
     currentBlankData = {
       sentence: data.sentence,
@@ -2289,11 +2568,15 @@ async function showFillBlank() {
     submitBtn.disabled = false;
     inputEl.focus();
   } catch (err) {
+    blankCache.delete(card.id);
     sentenceEl.textContent = 'Failed to generate sentence. Try again.';
     showToast('Error generating blank: ' + err.message);
   } finally {
     sentenceEl.style.opacity = '1';
   }
+
+  // Preload next cards in background
+  preloadUpcoming();
 }
 
 function showFilledSentence() {
@@ -2350,6 +2633,7 @@ async function submitBlankAnswer() {
     document.getElementById('card-phrase').style.display = '';
     document.getElementById('card-category').style.display = '';
     answerRevealed = true;
+    document.getElementById('review').classList.add('answer-revealed');
     showFilledSentence();
     document.getElementById('card-meaning').style.display = 'block';
     document.getElementById('card-example').style.display = 'block';
@@ -2358,6 +2642,7 @@ async function submitBlankAnswer() {
     document.getElementById('answer-section').classList.add('visible');
     if (card.source) document.getElementById('card-source').style.display = 'block';
     if (!card.example) fetchExample(card);
+    setTimeout(() => fb.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
     return;
   }
 
@@ -2367,17 +2652,13 @@ async function submitBlankAnswer() {
   btn.innerHTML = '<span class="loading-spinner"></span>Checking...';
 
   try {
-    const response = await fetch('/api/evaluate-blank', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const response = await apiFetch('/api/evaluate-blank', {
         phrase: card.phrase,
         meaning: card.meaning,
         sentence: currentBlankData.sentence,
         expectedAnswer: currentBlankData.answer,
         userAnswer
-      })
-    });
+      });
 
     if (!response.ok) throw new Error('Evaluation failed');
 
@@ -2395,6 +2676,7 @@ async function submitBlankAnswer() {
       ? `\nCorrect answer: ${currentBlankData.answer}\n\n${result.explanation}`
       : result.explanation;
     document.getElementById('feedback-explanation').textContent = correctLine;
+    setTimeout(() => fb.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
 
     // Hide fill-blank section, reveal the card
     document.getElementById('fill-blank-section').classList.remove('visible');
@@ -2403,6 +2685,7 @@ async function submitBlankAnswer() {
     document.getElementById('card-phrase').style.display = '';
     document.getElementById('card-category').style.display = '';
     answerRevealed = true;
+    document.getElementById('review').classList.add('answer-revealed');
     showFilledSentence();
     document.getElementById('card-meaning').style.display = 'block';
     document.getElementById('card-example').style.display = 'block';
@@ -2819,9 +3102,17 @@ let lookupData = null;
 function showLookup() {
   document.getElementById('lookup-input').value = '';
   document.getElementById('lookup-result').style.display = 'none';
+  document.getElementById('translate-input').value = '';
+  document.getElementById('translate-result').style.display = 'none';
+  document.getElementById('reverse-input').value = '';
+  document.getElementById('reverse-results').style.display = 'none';
+  document.getElementById('critique-sentence').value = '';
+  document.getElementById('critique-word').value = '';
+  document.getElementById('critique-result').style.display = 'none';
+  document.getElementById('polish-input').value = '';
+  document.getElementById('polish-result').style.display = 'none';
   lookupData = null;
   showScreen('lookup');
-  document.getElementById('lookup-input').focus();
 }
 
 async function doLookup() {
@@ -2834,18 +3125,19 @@ async function doLookup() {
   btn.textContent = '...';
 
   try {
-    const response = await fetch('/api/batch-enrich', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phrases: [phrase] })
-    });
+    const response = await apiFetch('/api/batch-enrich', { phrases: [phrase] });
 
     if (!response.ok) throw new Error('Lookup failed');
     const { results } = await response.json();
     if (!results || results.length === 0) throw new Error('No result');
 
     lookupData = results[0];
-    const isDupe = cards.some(c => c.phrase.toLowerCase() === lookupData.phrase.toLowerCase());
+    const lp = lookupData.phrase.toLowerCase().trim();
+    const up = phrase.toLowerCase().trim();
+    const isDupe = cards.some(c => {
+      const cp = c.phrase.toLowerCase().trim();
+      return cp === lp || cp === up || cp.startsWith(lp) || lp.startsWith(cp) || cp.startsWith(up) || up.startsWith(cp);
+    });
 
     document.getElementById('lookup-phrase').textContent = lookupData.phrase;
     document.getElementById('lookup-category').textContent = lookupData.category;
@@ -2884,11 +3176,7 @@ async function lookupRegenExample() {
   exEl.textContent = 'Generating...';
 
   try {
-    const response = await fetch('/api/generate-example', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phrase: lookupData.phrase, meaning: lookupData.meaning })
-    });
+    const response = await apiFetch('/api/generate-example', { phrase: lookupData.phrase, meaning: lookupData.meaning });
     if (!response.ok) throw new Error('Failed');
     const { example } = await response.json();
     lookupData.example = example;
@@ -2936,7 +3224,228 @@ async function lookupAddCard() {
 
   // Clear input so they can look up another
   document.getElementById('lookup-input').value = '';
-  document.getElementById('lookup-input').focus();
+}
+
+// ─── Translate Chinese → English ─────────────────────────────────────────
+
+async function doTranslate() {
+  const input = document.getElementById('translate-input');
+  const text = input.value.trim();
+  if (!text) { showToast('输入中文先'); return; }
+
+  const btn = document.getElementById('translate-btn');
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try {
+    const response = await apiFetch('/api/translate-zh', { text });
+    if (!response.ok) throw new Error('Translation failed');
+    const result = await response.json();
+
+    const container = document.getElementById('translate-result');
+    const phrasesHtml = (result.keyPhrases || []).map((kp, i) => {
+      const isDupe = cards.some(c => c.phrase.toLowerCase() === kp.phrase.toLowerCase());
+      return `<div class="qa-card" style="margin-top:10px;">
+        <div class="qa-card-header">
+          <span class="phrase">${escapeHtml(kp.phrase)}</span>
+          <button class="btn-speak btn-speak-inline" onclick="speakText(this, '${escapeHtml(kp.phrase).replace(/'/g, "\\'")}')" title="Hear pronunciation">&#128264;</button>
+          <span class="tag">${escapeHtml(kp.category || 'word')}</span>
+          ${isDupe ? '<span class="dupe-tag">already in deck</span>' : ''}
+        </div>
+        <div style="margin-top:8px;">
+          <label style="font-size:0.8rem; color:var(--text-dim);">Meaning</label>
+          <div style="font-size:0.95rem; margin-top:4px;">${escapeHtml(kp.meaning)}</div>
+        </div>
+        <div class="example-row">
+          <span class="example-text">${escapeHtml(kp.example)}</span>
+        </div>
+        <button class="btn-primary" onclick="translateAddCard(${i})" style="margin-top:8px; width:100%; padding:10px; font-size:0.9rem;"
+          ${isDupe ? 'disabled style="margin-top:8px; width:100%; padding:10px; font-size:0.9rem; opacity:0.5;"' : ''}>
+          ${isDupe ? 'Already in Deck' : 'Add to Deck'}
+        </button>
+      </div>`;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="qa-card" style="margin-top:12px; background:var(--surface2);">
+        <label style="font-size:0.8rem; color:var(--text-dim);">Translation</label>
+        <div style="font-size:1rem; margin-top:6px; line-height:1.5;">${escapeHtml(result.translation)}</div>
+        <button class="btn-speak btn-speak-inline" onclick="speakText(this, '${escapeHtml(result.translation).replace(/'/g, "\\'")}')" title="Hear translation" style="margin-top:8px;">&#128264;</button>
+      </div>
+      ${phrasesHtml.length ? `<div style="margin-top:16px;"><label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Key phrases worth learning</label>${phrasesHtml}</div>` : ''}
+    `;
+    container.style.display = 'block';
+
+    window._translateResults = result.keyPhrases || [];
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Translate';
+  }
+}
+
+async function translateAddCard(index) {
+  const r = window._translateResults[index];
+  if (!r) return;
+  const today = getToday();
+  const now = new Date().toISOString();
+
+  cards.unshift({
+    id: generateId(),
+    phrase: r.phrase,
+    meaning: r.meaning || '',
+    example: r.example || '',
+    category: r.category || 'word',
+    bucket: undefined,
+    createdAt: now,
+    source: 'Translate',
+    easeFactor: 2.5,
+    interval: 0,
+    repetitions: 0,
+    nextReview: today,
+    lastReview: null
+  });
+
+  await saveCards(cards);
+  updateDashboard();
+  showToast(`"${r.phrase}" added to deck!`);
+
+  // Update the button
+  const buttons = document.querySelectorAll('#translate-result .btn-primary');
+  if (buttons[index]) {
+    buttons[index].textContent = 'Added ✓';
+    buttons[index].disabled = true;
+    buttons[index].style.opacity = '0.5';
+  }
+}
+
+// ─── Reverse Lookup (describe → find words) ─────────────────────────────
+
+async function doReverseLookup() {
+  const input = document.getElementById('reverse-input');
+  const description = input.value.trim();
+  if (!description) { showToast('Describe what you mean first'); return; }
+
+  const btn = document.getElementById('reverse-btn');
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try {
+    const response = await apiFetch('/api/reverse-lookup', { description });
+    if (!response.ok) throw new Error('Lookup failed');
+    const { results } = await response.json();
+    if (!results || results.length === 0) throw new Error('No results found');
+
+    const container = document.getElementById('reverse-results');
+    container.innerHTML = results.map((r, i) => {
+      const isDupe = cards.some(c => c.phrase.toLowerCase() === r.phrase.toLowerCase());
+      return `<div class="qa-card" style="margin-top:12px;">
+        <div class="qa-card-header">
+          <span class="phrase">${escapeHtml(r.phrase)}</span>
+          <button class="btn-speak btn-speak-inline" onclick="speakText(this, '${escapeHtml(r.phrase).replace(/'/g, "\\'")}')" title="Hear pronunciation">&#128264;</button>
+          <span class="tag">${escapeHtml(r.category || 'word')}</span>
+          ${isDupe ? '<span class="dupe-tag">already in deck</span>' : ''}
+        </div>
+        <div style="margin-top:8px;">
+          <label style="font-size:0.8rem; color:var(--text-dim);">Meaning</label>
+          <div style="font-size:0.95rem; margin-top:4px;">${escapeHtml(r.meaning)}</div>
+        </div>
+        <div class="example-row">
+          <span class="example-text">${escapeHtml(r.example)}</span>
+        </div>
+        <button class="btn-primary" onclick="reverseAddCard(${i})" style="margin-top:8px; width:100%; padding:10px; font-size:0.9rem;"
+          ${isDupe ? 'disabled style="margin-top:8px; width:100%; padding:10px; font-size:0.9rem; opacity:0.5;"' : ''}>
+          ${isDupe ? 'Already in Deck' : 'Add to Deck'}
+        </button>
+      </div>`;
+    }).join('');
+    container.style.display = 'block';
+
+    // Store results for adding
+    window._reverseResults = results;
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Find';
+  }
+}
+
+async function reverseAddCard(index) {
+  const r = window._reverseResults[index];
+  if (!r) return;
+  const today = getToday();
+  const now = new Date().toISOString();
+
+  cards.unshift({
+    id: generateId(),
+    phrase: r.phrase,
+    meaning: r.meaning || '',
+    example: r.example || '',
+    category: r.category || 'word',
+    bucket: undefined,
+    createdAt: now,
+    source: 'Reverse Lookup',
+    easeFactor: 2.5,
+    interval: 0,
+    repetitions: 0,
+    nextReview: today,
+    lastReview: null
+  });
+
+  await saveCards(cards);
+  updateDashboard();
+  showToast(`Added "${r.phrase}" to deck`);
+
+  // Update the button that was clicked
+  const btns = document.querySelectorAll('#reverse-results .btn-primary');
+  if (btns[index]) {
+    btns[index].textContent = 'Added!';
+    btns[index].disabled = true;
+    btns[index].style.opacity = '0.5';
+  }
+}
+
+async function addWordFromCritique(btn, phrase) {
+  if (!phrase) return;
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try {
+    // Enrich the word to get meaning + example
+    const response = await apiFetch('/api/batch-enrich', { phrases: [phrase] });
+    if (!response.ok) throw new Error('Failed to enrich');
+    const { results } = await response.json();
+    const enriched = results && results[0] ? results[0] : { phrase, meaning: '', example: '', category: 'word' };
+
+    const today = getToday();
+    const now = new Date().toISOString();
+    cards.unshift({
+      id: generateId(),
+      phrase: enriched.phrase || phrase,
+      meaning: enriched.meaning || '',
+      example: enriched.example || '',
+      category: enriched.category || 'word',
+      bucket: undefined,
+      createdAt: now,
+      source: 'Word Check',
+      easeFactor: 2.5,
+      interval: 0,
+      repetitions: 0,
+      nextReview: today,
+      lastReview: null
+    });
+
+    await saveCards(cards);
+    updateDashboard();
+    showToast(`Added "${enriched.phrase || phrase}" to deck`);
+    btn.textContent = '✓';
+  } catch (err) {
+    showToast('Error: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = '+';
+  }
 }
 
 // Allow Enter key to trigger lookup
@@ -2945,7 +3454,194 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     doLookup();
   }
+  if (e.key === 'Enter' && document.activeElement?.id === 'reverse-input') {
+    e.preventDefault();
+    doReverseLookup();
+  }
+  if (e.key === 'Enter' && document.activeElement?.id === 'critique-word') {
+    e.preventDefault();
+    doCritique();
+  }
 });
+
+// ─── Word Choice Critique ────────────────────────────────────────────────
+
+async function doCritique() {
+  const sentence = document.getElementById('critique-sentence').value.trim();
+  const word = document.getElementById('critique-word').value.trim();
+  if (!sentence) { showToast('Type your sentence first'); return; }
+  if (!word) { showToast('Which word are you unsure about?'); return; }
+
+  const btn = document.getElementById('critique-btn');
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try {
+    const response = await apiFetch('/api/critique', { sentence, word });
+    if (!response.ok) throw new Error('Check failed');
+    const result = await response.json();
+
+    const verdictColors = {
+      correct: { bg: 'rgba(22, 163, 74, 0.1)', border: '#16a34a', text: '#16a34a', icon: '&#10004;' },
+      incorrect: { bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444', text: '#ef4444', icon: '&#10008;' },
+      awkward: { bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', text: '#f59e0b', icon: '&#9888;' }
+    };
+    const v = verdictColors[result.verdict] || verdictColors.awkward;
+
+    const container = document.getElementById('critique-result');
+    container.innerHTML = `
+      <div class="qa-card" style="margin-top:12px; border-left:4px solid ${v.border};">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+          <span style="font-size:1.4rem; color:${v.text};">${v.icon}</span>
+          <span style="font-size:1.1rem; font-weight:700; color:${v.text}; text-transform:capitalize;">${escapeHtml(result.verdict)}</span>
+        </div>
+        <div style="margin-bottom:12px;">${escapeHtml(result.explanation)}</div>
+        ${result.verdict !== 'correct' ? `
+          <div style="margin-bottom:12px;">
+            <label style="font-size:0.8rem; color:var(--text-dim);">Suggested word</label>
+            <div style="display:flex; align-items:center; gap:8px; margin-top:2px;">
+              <span style="font-weight:600;">${escapeHtml(result.suggestedWord || '')}</span>
+              ${!cards.some(c => c.phrase.toLowerCase() === (result.suggestedWord || '').toLowerCase()) ? `<button class="btn-add-word" onclick="addWordFromCritique(this, '${escapeHtml(result.suggestedWord || '').replace(/'/g, "\\'")}')" title="Add to deck">+</button>` : `<span style="font-size:0.7rem; color:var(--text-dim);">in deck</span>`}
+            </div>
+          </div>
+          <div style="margin-bottom:12px;">
+            <label style="font-size:0.8rem; color:var(--text-dim);">Corrected sentence</label>
+            <div style="font-style:italic; margin-top:2px;">${escapeHtml(result.correctedSentence || '')}</div>
+          </div>
+        ` : ''}
+        ${result.alternatives && result.alternatives.length > 0 ? `
+          <div>
+            <label style="font-size:0.8rem; color:var(--text-dim);">Other alternatives</label>
+            <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:6px;">
+              ${result.alternatives.map(a => {
+                const inDeck = cards.some(c => c.phrase.toLowerCase() === a.toLowerCase());
+                return `<span style="background:var(--surface2); padding:4px 10px; border-radius:20px; font-size:0.85rem; display:inline-flex; align-items:center; gap:4px;">${escapeHtml(a)}${!inDeck ? `<button class="btn-add-word" onclick="addWordFromCritique(this, '${escapeHtml(a).replace(/'/g, "\\'")}')" title="Add to deck">+</button>` : ''}</span>`;
+              }).join('')}
+            </div>
+          </div>
+        ` : ''}
+        ${result.originalWordExample ? `
+          <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--surface2);">
+            <label style="font-size:0.8rem; color:var(--text-dim);">How to use "${escapeHtml(word)}" correctly</label>
+            <div style="margin-top:4px; font-size:0.9rem;">${escapeHtml(result.originalWordMeaning || '')}</div>
+            <div style="margin-top:6px; font-style:italic; color:var(--accent2);">"${escapeHtml(result.originalWordExample)}"</div>
+            <div style="margin-top:8px;">
+              ${!cards.some(c => c.phrase.toLowerCase() === word.toLowerCase()) ? `<button class="btn-primary" onclick="addWordFromCritique(this, '${escapeHtml(word).replace(/'/g, "\\'")}')" style="padding:8px 16px; font-size:0.85rem; width:auto;">+ Add "${escapeHtml(word)}" to deck</button>` : `<span style="font-size:0.8rem; color:var(--text-dim);">"${escapeHtml(word)}" is already in your deck</span>`}
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+    container.style.display = 'block';
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check';
+  }
+}
+
+// ─── Polish My Sentence ──────────────────────────────────────────────────
+
+async function doPolish() {
+  const input = document.getElementById('polish-input');
+  const sentence = input.value.trim();
+  if (!sentence) { showToast('Type a sentence first'); return; }
+
+  const btn = document.getElementById('polish-btn');
+  btn.disabled = true;
+  btn.textContent = 'Polishing...';
+
+  try {
+    const response = await apiFetch('/api/polish', { sentence });
+    if (!response.ok) throw new Error('Polish failed');
+    const result = await response.json();
+
+    const changesHtml = (result.changes || []).filter(c => c.original.trim().toLowerCase() !== c.improved.trim().toLowerCase()).map(c =>
+      `<div style="margin-top:8px; padding:8px; background:var(--surface1); border-radius:8px;">
+        <div style="font-size:0.85rem;"><span style="text-decoration:line-through; color:var(--danger);">${escapeHtml(c.original)}</span> → <span style="color:var(--success); font-weight:600;">${escapeHtml(c.improved)}</span></div>
+        <div style="font-size:0.8rem; color:var(--text-dim); margin-top:4px;">${escapeHtml(c.reason)}</div>
+      </div>`
+    ).join('');
+
+    const phrasesHtml = (result.keyPhrases || []).map((kp, i) => {
+      const isDupe = cards.some(c => c.phrase.toLowerCase() === kp.phrase.toLowerCase());
+      return `<div class="qa-card" style="margin-top:10px;">
+        <div class="qa-card-header">
+          <span class="phrase">${escapeHtml(kp.phrase)}</span>
+          <button class="btn-speak btn-speak-inline" onclick="speakText(this, '${escapeHtml(kp.phrase).replace(/'/g, "\\'")}')" title="Hear pronunciation">&#128264;</button>
+          <span class="tag">${escapeHtml(kp.category || 'word')}</span>
+          ${isDupe ? '<span class="dupe-tag">already in deck</span>' : ''}
+        </div>
+        <div style="margin-top:8px;">
+          <label style="font-size:0.8rem; color:var(--text-dim);">Meaning</label>
+          <div style="font-size:0.95rem; margin-top:4px;">${escapeHtml(kp.meaning)}</div>
+        </div>
+        <div class="example-row">
+          <span class="example-text">${escapeHtml(kp.example)}</span>
+        </div>
+        <button class="btn-primary" onclick="polishAddCard(${i})" style="margin-top:8px; width:100%; padding:10px; font-size:0.9rem;"
+          ${isDupe ? 'disabled style="margin-top:8px; width:100%; padding:10px; font-size:0.9rem; opacity:0.5;"' : ''}>
+          ${isDupe ? 'Already in Deck' : 'Add to Deck'}
+        </button>
+      </div>`;
+    }).join('');
+
+    const container = document.getElementById('polish-result');
+    container.innerHTML = `
+      <div class="qa-card" style="margin-top:12px; background:var(--surface2);">
+        <label style="font-size:0.8rem; color:var(--text-dim);">Polished</label>
+        <div style="font-size:1rem; margin-top:6px; line-height:1.5; font-weight:500;">${escapeHtml(result.polished)}</div>
+        <button class="btn-speak btn-speak-inline" onclick="speakText(this, '${escapeHtml(result.polished).replace(/'/g, "\\'")}')" title="Hear polished sentence" style="margin-top:8px;">&#128264;</button>
+        <button class="btn-secondary" onclick="navigator.clipboard.writeText('${escapeHtml(result.polished).replace(/'/g, "\\'")}'); showToast('Copied!')" style="margin-top:8px; margin-left:8px; padding:6px 12px; font-size:0.8rem;">Copy</button>
+      </div>
+      ${changesHtml ? `<div style="margin-top:16px;"><label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">What changed</label>${changesHtml}</div>` : ''}
+      ${phrasesHtml ? `<div style="margin-top:16px;"><label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Key phrases worth learning</label>${phrasesHtml}</div>` : ''}
+    `;
+    container.style.display = 'block';
+
+    window._polishResults = result.keyPhrases || [];
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Polish';
+  }
+}
+
+async function polishAddCard(index) {
+  const r = window._polishResults[index];
+  if (!r) return;
+  const today = getToday();
+  const now = new Date().toISOString();
+
+  cards.unshift({
+    id: generateId(),
+    phrase: r.phrase,
+    meaning: r.meaning || '',
+    example: r.example || '',
+    category: r.category || 'word',
+    bucket: undefined,
+    createdAt: now,
+    source: 'Polish',
+    easeFactor: 2.5,
+    interval: 0,
+    repetitions: 0,
+    nextReview: today,
+    lastReview: null
+  });
+
+  await saveCards(cards);
+  updateDashboard();
+  showToast(`"${r.phrase}" added to deck!`);
+
+  const buttons = document.querySelectorAll('#polish-result .btn-primary');
+  if (buttons[index]) {
+    buttons[index].textContent = 'Added ✓';
+    buttons[index].disabled = true;
+    buttons[index].style.opacity = '0.5';
+  }
+}
 
 // ─── Verify a Phrase ─────────────────────────────────────────────────────
 
@@ -2973,25 +3669,13 @@ async function doVerify() {
 
   try {
     // First get the phrase meaning (for context and potential add-to-deck)
-    const enrichRes = await fetch('/api/batch-enrich', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phrases: [phrase] })
-    });
+    const enrichRes = await apiFetch('/api/batch-enrich', { phrases: [phrase] });
     if (!enrichRes.ok) throw new Error('Failed to look up phrase');
     const { results: enrichResults } = await enrichRes.json();
     verifyData = enrichResults[0];
 
     // Now evaluate the usage
-    const evalRes = await fetch('/api/evaluate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        phrase,
-        meaning: verifyData.meaning,
-        userAnswer: sentence
-      })
-    });
+    const evalRes = await apiFetch('/api/evaluate', { phrase, meaning: verifyData.meaning, userAnswer: sentence });
     if (!evalRes.ok) throw new Error('Evaluation failed');
     const result = await evalRes.json();
 
@@ -3097,11 +3781,7 @@ async function quickAddGenerate() {
 
   try {
     // Send ALL phrases (including dupes) so we can show them flagged
-    const response = await fetch('/api/batch-enrich', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phrases })
-    });
+    const response = await apiFetch('/api/batch-enrich', { phrases });
 
     if (!response.ok) {
       const err = await response.json();
@@ -3179,11 +3859,7 @@ async function quickAddRegenExample(index) {
   exampleEl.textContent = 'Generating...';
 
   try {
-    const response = await fetch('/api/generate-example', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phrase: item.phrase, meaning: item.meaning })
-    });
+    const response = await apiFetch('/api/generate-example', { phrase: item.phrase, meaning: item.meaning });
 
     if (!response.ok) throw new Error('Failed to generate');
     const { example } = await response.json();
@@ -3493,11 +4169,7 @@ async function fetchExample(card) {
   exEl.style.opacity = '0.5';
 
   try {
-    const response = await fetch('/api/generate-example', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phrase: card.phrase, meaning: card.meaning })
-    });
+    const response = await apiFetch('/api/generate-example', { phrase: card.phrase, meaning: card.meaning });
 
     if (!response.ok) throw new Error('Failed');
 
@@ -3521,11 +4193,7 @@ async function fetchExample(card) {
 // ─── LLM Evaluation (via backend) ───────────────────────────────────────
 
 async function evaluateAnswer(phrase, correctMeaning, userAnswer) {
-  const response = await fetch('/api/evaluate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phrase, meaning: correctMeaning, userAnswer })
-  });
+  const response = await apiFetch('/api/evaluate', { phrase, meaning: correctMeaning, userAnswer });
 
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -3567,10 +4235,12 @@ async function submitTypedAnswer() {
       result.verdict === 'correct' ? 'Correct!' :
       result.verdict === 'partial' ? 'Partially correct' : 'Not quite';
     document.getElementById('feedback-explanation').textContent = result.explanation;
+    setTimeout(() => fb.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
 
     // Hide type section, reveal the actual answer on the card
     document.getElementById('type-answer-section').classList.remove('visible');
     answerRevealed = true;
+    document.getElementById('review').classList.add('answer-revealed');
     document.getElementById('card-meaning').style.display = 'block';
     document.getElementById('card-example').style.display = 'block';
     document.getElementById('card-divider').style.display = 'block';
@@ -3744,6 +4414,176 @@ async function bootstrapCardsFromCachedSources() {
   await Promise.all([syncDailySessionFromServer(), syncDailyCompletionsFromServer()]);
   updateDashboard();
 })();
+
+// ─── Swipe Gestures (touch devices only) ────────────────────────────────
+(function initSwipe() {
+  let startX = 0, startY = 0, swiping = false;
+  const THRESHOLD = 60; // minimum px to trigger swipe
+  const reviewScreen = document.getElementById('review');
+  if (!reviewScreen) return;
+
+  // Swipe overlay indicator
+  const overlay = document.createElement('div');
+  overlay.id = 'swipe-overlay';
+  overlay.innerHTML = '<span id="swipe-label"></span>';
+  reviewScreen.appendChild(overlay);
+
+  reviewScreen.addEventListener('touchstart', (e) => {
+    // Don't intercept touches on inputs, textareas, or buttons
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'BUTTON' || tag === 'SELECT') return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    swiping = true;
+  }, { passive: true });
+
+  reviewScreen.addEventListener('touchmove', (e) => {
+    if (!swiping || !answerRevealed) return;
+    const dx = e.touches[0].clientX - startX;
+    const dy = e.touches[0].clientY - startY;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    // Determine dominant direction
+    let direction = null;
+    if (absDx > 30 && absDx > absDy) {
+      direction = dx > 0 ? 'right' : 'left';
+    } else if (absDy > 30 && absDy > absDx && dy < 0) {
+      direction = 'up';
+    }
+
+    const label = document.getElementById('swipe-label');
+    if (direction === 'right') {
+      overlay.style.opacity = Math.min(absDx / THRESHOLD, 1) * 0.85;
+      overlay.style.background = 'rgba(22, 163, 74, 0.9)';
+      label.textContent = 'Nailed it ✓';
+    } else if (direction === 'left') {
+      overlay.style.opacity = Math.min(absDx / THRESHOLD, 1) * 0.85;
+      overlay.style.background = 'rgba(239, 68, 68, 0.9)';
+      label.textContent = 'Nope ✗';
+    } else if (direction === 'up') {
+      overlay.style.opacity = Math.min(absDy / THRESHOLD, 1) * 0.85;
+      overlay.style.background = 'rgba(245, 158, 11, 0.9)';
+      label.textContent = 'Kinda ~';
+    } else {
+      overlay.style.opacity = '0';
+    }
+  }, { passive: true });
+
+  reviewScreen.addEventListener('touchend', (e) => {
+    if (!swiping) return;
+    swiping = false;
+    overlay.style.opacity = '0';
+
+    if (!answerRevealed) return;
+
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (absDx > THRESHOLD && absDx > absDy) {
+      if (dx > 0) rateCard(5);       // swipe right = Nailed it
+      else rateCard(0);              // swipe left = Nope
+    } else if (absDy > THRESHOLD && absDy > absDx && dy < 0) {
+      rateCard(3);                   // swipe up = Kinda
+    }
+  }, { passive: true });
+})();
+
+// ─── Edge Swipe Back Navigation (iOS-style) ─────────────────────────────
+(function initEdgeSwipeBack() {
+  let startX = 0, startY = 0, edgeSwipe = false, activeScreen = null;
+  const EDGE_ZONE = 30;
+  const THRESHOLD = 100;
+  const screenWidth = () => window.innerWidth;
+
+  // Shadow overlay that appears behind the sliding screen
+  const shadow = document.createElement('div');
+  shadow.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0);z-index:9998;pointer-events:none;display:none;';
+  document.body.appendChild(shadow);
+
+  document.addEventListener('touchstart', (e) => {
+    const x = e.touches[0].clientX;
+    if (x > EDGE_ZONE) return;
+    const active = document.querySelector('.screen.active');
+    if (!active || active.id === 'dashboard' || active.id === 'review') return;
+    startX = x;
+    startY = e.touches[0].clientY;
+    edgeSwipe = true;
+    activeScreen = active;
+    // Prep the screen for sliding
+    activeScreen.style.transition = 'none';
+    activeScreen.style.zIndex = '9999';
+    activeScreen.style.position = 'relative';
+    shadow.style.display = 'block';
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!edgeSwipe || !activeScreen) return;
+    const dx = e.touches[0].clientX - startX;
+    const dy = Math.abs(e.touches[0].clientY - startY);
+    // Cancel if vertical movement dominates early on
+    if (dy > Math.abs(dx) && dx < 20) {
+      resetSwipe();
+      return;
+    }
+    // Only allow rightward drag
+    const offset = Math.max(0, dx);
+    activeScreen.style.transform = `translateX(${offset}px)`;
+    // Darken shadow proportionally
+    const progress = Math.min(offset / screenWidth(), 1);
+    shadow.style.background = `rgba(0,0,0,${0.3 * (1 - progress)})`;
+  }, { passive: true });
+
+  document.addEventListener('touchend', (e) => {
+    if (!edgeSwipe || !activeScreen) return;
+    const dx = e.changedTouches[0].clientX - startX;
+
+    if (dx > THRESHOLD) {
+      // Complete the swipe — slide off screen then navigate back
+      activeScreen.style.transition = 'transform 0.25s ease-out';
+      activeScreen.style.transform = `translateX(${screenWidth()}px)`;
+      shadow.style.transition = 'background 0.25s ease-out';
+      shadow.style.background = 'rgba(0,0,0,0)';
+      setTimeout(() => {
+        const backBtn = activeScreen.querySelector('.back');
+        resetSwipe();
+        if (backBtn) backBtn.click();
+      }, 250);
+    } else {
+      // Snap back
+      activeScreen.style.transition = 'transform 0.2s ease-out';
+      activeScreen.style.transform = 'translateX(0)';
+      shadow.style.transition = 'background 0.2s ease-out';
+      shadow.style.background = 'rgba(0,0,0,0)';
+      setTimeout(resetSwipe, 200);
+    }
+    edgeSwipe = false;
+  }, { passive: true });
+
+  function resetSwipe() {
+    edgeSwipe = false;
+    if (activeScreen) {
+      activeScreen.style.transition = '';
+      activeScreen.style.transform = '';
+      activeScreen.style.zIndex = '';
+      activeScreen.style.position = '';
+    }
+    activeScreen = null;
+    shadow.style.display = 'none';
+    shadow.style.transition = '';
+    shadow.style.background = 'rgba(0,0,0,0)';
+  }
+})();
+
+// ─── Mobile keyboard: keep sentence visible when input focused ───────────
+document.getElementById('blank-answer').addEventListener('focus', () => {
+  setTimeout(() => {
+    const sentence = document.getElementById('blank-sentence');
+    if (sentence) sentence.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 350); // wait for keyboard to finish opening
+});
 
 // Register service worker for PWA
 if ('serviceWorker' in navigator) {
