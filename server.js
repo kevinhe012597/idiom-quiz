@@ -31,6 +31,14 @@ const NOTION_PAGE_IDS = (process.env.NOTION_PAGE_IDS || '6c5f0587-e35c-4c01-9b38
 // Apple Notes names to sync
 const APPLE_NOTES_NAMES = (process.env.APPLE_NOTES_NAMES || 'List,Words,Second List,2026 words').split(',').map(s => s.trim());
 
+const ALLOWED_MODELS = new Set([
+  'gpt-4o-mini', 'gpt-5.4-nano', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-pro'
+]);
+const DEFAULT_MODEL = 'gpt-5.4-mini';
+function pickModel(body) {
+  return (body && body.model && ALLOWED_MODELS.has(body.model)) ? body.model : DEFAULT_MODEL;
+}
+
 if (!OPENAI_API_KEY) {
   console.error('ERROR: OPENAI_API_KEY not set. Add it to .env file.');
   process.exit(1);
@@ -81,7 +89,8 @@ const server = http.createServer(async (req, res) => {
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        const { phrase, meaning, userAnswer } = JSON.parse(body);
+        const _body = JSON.parse(body);
+        const { phrase, meaning, userAnswer } = _body;
 
         if (!phrase || !meaning || !userAnswer) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -89,7 +98,7 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        const result = await callOpenAI(phrase, meaning, userAnswer);
+        const result = await callOpenAI(phrase, meaning, userAnswer, pickModel(_body));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       } catch (err) {
@@ -284,14 +293,15 @@ const server = http.createServer(async (req, res) => {
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        const { phrase, meaning } = JSON.parse(body);
+        const _body = JSON.parse(body);
+        const { phrase, meaning } = _body;
         if (!phrase) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing phrase' }));
           return;
         }
 
-        const example = await generateExample(phrase, meaning || '');
+        const example = await generateExample(phrase, meaning || '', pickModel(_body));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ example }));
       } catch (err) {
@@ -309,14 +319,15 @@ const server = http.createServer(async (req, res) => {
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        const { phrase, meaning } = JSON.parse(body);
+        const _body2 = JSON.parse(body);
+        const { phrase, meaning } = _body2;
         if (!phrase) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing phrase' }));
           return;
         }
 
-        const result = await generateBlankSentence(phrase, meaning || '');
+        const result = await generateBlankSentence(phrase, meaning || '', pickModel(_body2));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       } catch (err) {
@@ -359,7 +370,8 @@ const server = http.createServer(async (req, res) => {
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        const { phrase, meaning, sentence, expectedAnswer, userAnswer } = JSON.parse(body);
+        const _body = JSON.parse(body);
+        const { phrase, meaning, sentence, expectedAnswer, userAnswer } = _body;
         if (!phrase || !userAnswer) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing required fields' }));
@@ -371,7 +383,8 @@ const server = http.createServer(async (req, res) => {
           meaning || '',
           sentence || '',
           expectedAnswer || phrase,
-          userAnswer
+          userAnswer,
+          pickModel(_body)
         );
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
@@ -390,19 +403,21 @@ const server = http.createServer(async (req, res) => {
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        const { phrases } = JSON.parse(body);
+        const _body = JSON.parse(body);
+        const { phrases } = _body;
         if (!Array.isArray(phrases) || phrases.length === 0) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing required field: phrases (non-empty array)' }));
           return;
         }
 
+        const _model = pickModel(_body);
         // Process in batches of 10
         const BATCH_SIZE = 10;
         const results = [];
         for (let i = 0; i < phrases.length; i += BATCH_SIZE) {
           const batch = phrases.slice(i, i + BATCH_SIZE);
-          const batchResults = await enrichBatch(batch);
+          const batchResults = await enrichBatch(batch, _model);
           results.push(...batchResults);
         }
 
@@ -410,6 +425,423 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ results }));
       } catch (err) {
         console.error('Batch enrich error:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Reverse lookup: description → matching words/phrases
+  if (req.method === 'POST' && req.url === '/api/reverse-lookup') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { description } = _body;
+        if (!description) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing description' }));
+          return;
+        }
+
+        const payload = JSON.stringify({
+          model: pickModel(_body),
+          messages: [
+            {
+              role: 'system',
+              content: `You are a vocabulary expert. Given a description of a concept or situation, suggest 3-5 English words, idioms, or phrases that best capture that meaning. For each, provide the phrase, its category (word, phrase, or idiom), a concise meaning, and a natural example sentence. Return JSON array: [{"phrase":"...","category":"...","meaning":"...","example":"..."}]`
+            },
+            {
+              role: 'user',
+              content: description
+            }
+          ],
+          temperature: 0.8
+        });
+
+        const https = require('https');
+        const options = {
+          hostname: 'api.openai.com',
+          path: '/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        const apiReq = https.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `OpenAI API error: ${apiRes.statusCode}` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices[0].message.content.trim();
+              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+              const results = JSON.parse(jsonStr);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ results }));
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Chinese → English translate + key phrases endpoint
+  if (req.method === 'POST' && req.url === '/api/translate-zh') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { text } = _body;
+        if (!text) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing text' }));
+          return;
+        }
+
+        const payload = JSON.stringify({
+          model: pickModel(_body),
+          messages: [
+            {
+              role: 'system',
+              content: `You are a translation and vocabulary expert. The user will provide Chinese text. You must:
+1. Translate it into natural, fluent English.
+2. Identify 2-5 key English words, idioms, or phrases from the translation that are especially useful vocabulary — words that are expressive, nuanced, or worth learning. Prioritize idioms, phrasal verbs, and advanced vocabulary over common words.
+3. For each key phrase, provide its category (word, phrase, or idiom), a concise meaning, and a natural example sentence.
+
+Return JSON:
+{
+  "translation": "The full English translation",
+  "keyPhrases": [
+    {"phrase": "...", "category": "word|phrase|idiom", "meaning": "...", "example": "..."}
+  ]
+}`
+            },
+            {
+              role: 'user',
+              content: text
+            }
+          ],
+          temperature: 0.7
+        });
+
+        const https = require('https');
+        const options = {
+          hostname: 'api.openai.com',
+          path: '/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        const apiReq = https.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `OpenAI API error: ${apiRes.statusCode}` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices[0].message.content.trim();
+              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+              const result = JSON.parse(jsonStr);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Word choice critique endpoint
+  if (req.method === 'POST' && req.url === '/api/critique') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { sentence, word } = _body;
+        if (!sentence || !word) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing sentence or word' }));
+          return;
+        }
+
+        const payload = JSON.stringify({
+          model: pickModel(_body),
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert English language coach. The user has written a sentence and is unsure whether a specific word is used correctly. Analyze the word in context and respond with JSON:
+{
+  "verdict": "correct" | "incorrect" | "awkward",
+  "explanation": "Brief explanation of why the word works or doesn't work in this context",
+  "correctedSentence": "The sentence with the better word choice (only if incorrect/awkward, otherwise same as original)",
+  "suggestedWord": "The better word to use (only if incorrect/awkward, otherwise the same word)",
+  "alternatives": ["2-3 other words that could also work well here"],
+  "originalWordMeaning": "The meaning of the word the user asked about",
+  "originalWordExample": "An example sentence where the user's original word WOULD be used correctly and naturally"
+}
+Be concise but helpful. If the word is correct, acknowledge it and still offer alternatives for variety. Always provide originalWordMeaning and originalWordExample showing proper usage of the queried word.`
+            },
+            {
+              role: 'user',
+              content: `Sentence: "${sentence}"\nWord I'm unsure about: "${word}"`
+            }
+          ],
+          temperature: 0.5
+        });
+
+        const https = require('https');
+        const options = {
+          hostname: 'api.openai.com',
+          path: '/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        const apiReq = https.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `OpenAI API error: ${apiRes.statusCode}` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices[0].message.content.trim();
+              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+              const result = JSON.parse(jsonStr);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Polish sentence endpoint
+  if (req.method === 'POST' && req.url === '/api/polish') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { sentence } = _body;
+        if (!sentence) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing sentence' }));
+          return;
+        }
+
+        const payload = JSON.stringify({
+          model: pickModel(_body),
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert English writing coach. The user will give you a rough, casual, or awkwardly phrased sentence. Your job is to:
+1. Rewrite it into a polished, natural, fluent English sentence that preserves the original meaning and tone (don't make it overly formal unless the context calls for it — aim for clear, confident, natural English).
+2. Briefly explain 2-4 key changes you made and why.
+3. Identify 1-3 notable words or phrases from your polished version that are good vocabulary to learn.
+
+Return JSON:
+{
+  "polished": "The refined sentence",
+  "changes": [
+    {"original": "rough part", "improved": "polished part", "reason": "why this is better"}
+  ],
+  "keyPhrases": [
+    {"phrase": "...", "category": "word|phrase|idiom", "meaning": "...", "example": "..."}
+  ]
+}`
+            },
+            {
+              role: 'user',
+              content: sentence
+            }
+          ],
+          temperature: 0.7
+        });
+
+        const https = require('https');
+        const options = {
+          hostname: 'api.openai.com',
+          path: '/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        const apiReq = https.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `OpenAI API error: ${apiRes.statusCode}` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices[0].message.content.trim();
+              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+              const result = JSON.parse(jsonStr);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // TTS endpoint
+  if (req.method === 'POST' && req.url === '/api/tts') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { text } = JSON.parse(body);
+        if (!text) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing text' }));
+          return;
+        }
+
+        const https = require('https');
+        const payload = JSON.stringify({
+          model: 'tts-1',
+          input: text,
+          voice: 'nova',
+          response_format: 'mp3',
+          speed: 0.7
+        });
+
+        const options = {
+          hostname: 'api.openai.com',
+          path: '/v1/audio/speech',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        const apiReq = https.request(options, (apiRes) => {
+          if (apiRes.statusCode !== 200) {
+            let errData = '';
+            apiRes.on('data', chunk => { errData += chunk; });
+            apiRes.on('end', () => {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `TTS API error: ${apiRes.statusCode}` }));
+            });
+            return;
+          }
+          // Buffer the full response before sending to avoid partial audio playback
+          const chunks = [];
+          apiRes.on('data', chunk => { chunks.push(chunk); });
+          apiRes.on('end', () => {
+            const buffer = Buffer.concat(chunks);
+            res.writeHead(200, {
+              'Content-Type': 'audio/mpeg',
+              'Content-Length': buffer.length
+            });
+            res.end(buffer);
+          });
+        });
+
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
@@ -442,11 +874,11 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-async function callOpenAI(phrase, correctMeaning, userAnswer) {
+async function callOpenAI(phrase, correctMeaning, userAnswer, model) {
   const payload = JSON.stringify({
-    model: 'gpt-4o-mini',
+    model: model || DEFAULT_MODEL,
     temperature: 0.3,
-    max_tokens: 200,
+    max_completion_tokens: 200,
     messages: [
       {
         role: 'system',
@@ -509,11 +941,11 @@ Only output valid JSON, nothing else.`
   });
 }
 
-async function generateExample(phrase, meaning) {
+async function generateExample(phrase, meaning, model) {
   const payload = JSON.stringify({
-    model: 'gpt-4o-mini',
+    model: model || DEFAULT_MODEL,
     temperature: 1.2,
-    max_tokens: 100,
+    max_completion_tokens: 100,
     messages: [
       {
         role: 'system',
@@ -567,11 +999,11 @@ async function generateExample(phrase, meaning) {
 }
 
 // Generate a fill-in-the-blank sentence
-async function generateBlankSentence(phrase, meaning) {
+async function generateBlankSentence(phrase, meaning, model) {
   const payload = JSON.stringify({
-    model: 'gpt-4o-mini',
+    model: model || DEFAULT_MODEL,
     temperature: 0.7,
-    max_tokens: 200,
+    max_completion_tokens: 200,
     messages: [
       {
         role: 'system',
@@ -954,11 +1386,11 @@ function generateBlankHint(phrase, hintLevel, category) {
 }
 
 // Evaluate fill-in-the-blank answer
-async function evaluateBlankAnswer(phrase, meaning, sentence, expectedAnswer, userAnswer) {
+async function evaluateBlankAnswer(phrase, meaning, sentence, expectedAnswer, userAnswer, model) {
   const payload = JSON.stringify({
-    model: 'gpt-4o-mini',
+    model: model || DEFAULT_MODEL,
     temperature: 0.3,
-    max_tokens: 200,
+    max_completion_tokens: 200,
     messages: [
       {
         role: 'system',
@@ -1043,12 +1475,12 @@ function saveCardsToDb(cards) {
   upsertAppStateStmt.run('cards', JSON.stringify(cards), new Date().toISOString());
 }
 
-async function enrichBatch(phrases) {
+async function enrichBatch(phrases, model) {
   const numbered = phrases.map((p, i) => `${i + 1}. ${p}`).join('\n');
   const payload = JSON.stringify({
-    model: 'gpt-4o-mini',
+    model: model || DEFAULT_MODEL,
     temperature: 0.3,
-    max_tokens: 2000,
+    max_completion_tokens: 2000,
     messages: [
       {
         role: 'system',
@@ -1059,8 +1491,10 @@ async function enrichBatch(phrases) {
    - "idiom" = figurative expression whose meaning isn't obvious from the words (e.g. "break the ice", "under the weather")
    - "phrase" = multi-word expression that isn't an idiom (e.g. "pros and cons", "take into account")
    - "word" = single word or compound word (e.g. "ubiquitous", "shortchange")
+4. "isIdiomatic": true if this is a recognized, commonly-used English word, idiom, or established expression. false if it's not a real phrase, is a malapropism, a garbled/made-up expression, or a near-miss of a real phrase (e.g. "blessing in the skies" → false, "break the freeze" → false)
+5. "suggestions": if isIdiomatic is false, provide 2-4 real English words, idioms, or phrases the user might have been thinking of. Empty array [] if isIdiomatic is true.
 
-Respond with a JSON array in the same order as the input. Each element must have exactly: "phrase", "meaning", "example", "category".
+Respond with a JSON array in the same order as the input. Each element must have exactly: "phrase", "meaning", "example", "category", "isIdiomatic", "suggestions".
 
 Only output valid JSON, nothing else.`
       },
@@ -1103,7 +1537,9 @@ Only output valid JSON, nothing else.`
             phrase: phrases[i],
             meaning: r.meaning || '',
             example: r.example || '',
-            category: r.category || 'word'
+            category: r.category || 'word',
+            isIdiomatic: r.isIdiomatic !== false,
+            suggestions: Array.isArray(r.suggestions) ? r.suggestions : []
           })));
         } catch (e) {
           reject(new Error('Failed to parse OpenAI response for batch enrich'));

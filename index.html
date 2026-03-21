@@ -1366,6 +1366,11 @@ textarea { resize: vertical; min-height: 80px; }
     <button class="btn-primary" id="lookup-btn" onclick="doLookup()">Look Up</button>
   </div>
   <div id="lookup-result" style="display:none;">
+    <div id="lookup-validation" style="display:none; margin-bottom:12px; padding:12px 14px; background:rgba(255,180,0,0.12); border:1px solid rgba(255,180,0,0.3); border-radius:10px;">
+      <div style="font-size:0.9rem; font-weight:600; color:#e6a700; margin-bottom:8px;">⚠️ This doesn't appear to be a standard English expression</div>
+      <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:6px;">Did you mean:</div>
+      <div id="lookup-suggestions" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+    </div>
     <div class="qa-card" id="lookup-card">
       <div class="qa-card-header">
         <span class="phrase" id="lookup-phrase"></span>
@@ -3193,6 +3198,18 @@ async function doLookup() {
     document.getElementById('lookup-meaning').textContent = lookupData.meaning;
     document.getElementById('lookup-example').textContent = lookupData.example;
 
+    // Show validation warning if not a real expression
+    const validationEl = document.getElementById('lookup-validation');
+    const suggestionsEl = document.getElementById('lookup-suggestions');
+    if (lookupData.isIdiomatic === false) {
+      suggestionsEl.innerHTML = (lookupData.suggestions || []).map(s =>
+        `<button onclick="lookupSuggestion('${s.replace(/'/g, "\\'")}')" style="padding:6px 12px; border-radius:20px; border:1px solid var(--accent); background:var(--surface1); color:var(--accent); font-size:0.85rem; cursor:pointer; font-weight:500; transition:all 0.15s;">${s}</button>`
+      ).join('');
+      validationEl.style.display = 'block';
+    } else {
+      validationEl.style.display = 'none';
+    }
+
     const dupeTag = document.getElementById('lookup-dupe');
     const addBtn = document.getElementById('lookup-add-btn');
     if (isDupe) {
@@ -3214,6 +3231,12 @@ async function doLookup() {
     btn.disabled = false;
     btn.textContent = 'Look Up';
   }
+}
+
+function lookupSuggestion(phrase) {
+  document.getElementById('lookup-input').value = phrase;
+  document.getElementById('lookup-result').style.display = 'none';
+  doLookup();
 }
 
 async function lookupRegenExample() {
