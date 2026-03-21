@@ -1304,6 +1304,10 @@ textarea { resize: vertical; min-height: 80px; }
           <option value="skip">Not Useful</option>
         </select>
       </div>
+      <div id="card-history-section" class="form-group" style="display:none;">
+        <label style="font-size:0.75rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Card Info</label>
+        <div id="card-history-content" style="font-size:0.85rem; color:var(--text); line-height:1.7; margin-top:6px; padding:10px 12px; background:var(--surface1); border-radius:10px;"></div>
+      </div>
       <div class="form-actions">
         <button class="btn-secondary" onclick="cancelEdit()">Cancel</button>
         <button class="btn-primary" id="save-card-btn" onclick="saveCard()">Save</button>
@@ -2802,6 +2806,8 @@ function rateCard(quality) {
 
   if (quality === -1) {
     // Not Useful — skip from future reviews
+    if (!card.ratingHistory) card.ratingHistory = [];
+    card.ratingHistory.push({ bucket: 'skip', date: new Date().toISOString() });
     applyBucketChange(card, 'skip');
     const idx = cards.findIndex(c => c.id === card.id);
     if (idx !== -1) cards[idx] = card;
@@ -2825,6 +2831,10 @@ function rateCard(quality) {
   if (prevBucket !== updates.bucket || !card.bucketUpdatedAt) {
     updates.bucketUpdatedAt = getToday();
   }
+
+  // Track rating history
+  if (!card.ratingHistory) card.ratingHistory = [];
+  card.ratingHistory.push({ bucket: updates.bucket, date: new Date().toISOString() });
 
   // Apply updates to card
   Object.assign(card, updates);
@@ -2988,6 +2998,7 @@ function showAddForm() {
   editingFromReview = false;
   document.getElementById('form-title').textContent = 'Add Cards';
   document.getElementById('edit-form-fields').style.display = 'none';
+  document.getElementById('card-history-section').style.display = 'none';
   document.getElementById('quick-add-section').style.display = 'block';
   quickAddReset();
   showScreen('add-edit');
@@ -3008,6 +3019,44 @@ function editCard(id) {
   document.getElementById('input-category').value = card.category;
   document.getElementById('input-bucket').value = card.bucket || '';
   document.getElementById('delete-card-btn').style.display = 'block';
+
+  // Populate Card Info section
+  const historySection = document.getElementById('card-history-section');
+  const historyContent = document.getElementById('card-history-content');
+  historySection.style.display = 'block';
+
+  let infoHtml = '';
+
+  // When added + source
+  if (card.createdAt) {
+    const d = new Date(card.createdAt);
+    const formatted = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    infoHtml += `<div>Added <strong>${formatted}</strong> via ${escapeHtml(card.source || 'Unknown')}</div>`;
+  }
+
+  // Creation context
+  if (card.sourceContext) {
+    const ctx = card.sourceContext.length > 120 ? card.sourceContext.slice(0, 120) + '...' : card.sourceContext;
+    infoHtml += `<div style="margin-top:4px; padding:6px 10px; background:var(--surface2); border-radius:8px; font-size:0.82rem; color:var(--text-dim);">
+      Original query: &ldquo;${escapeHtml(ctx)}&rdquo;
+    </div>`;
+  }
+
+  // Rating history summary
+  if (card.ratingHistory && card.ratingHistory.length > 0) {
+    const counts = { nope: 0, kinda: 0, nailed: 0, skip: 0 };
+    card.ratingHistory.forEach(r => { if (counts[r.bucket] !== undefined) counts[r.bucket]++; });
+    const total = card.ratingHistory.length;
+    const parts = [];
+    if (counts.nope) parts.push(`<span style="color:var(--red);">${counts.nope} Nope</span>`);
+    if (counts.kinda) parts.push(`<span style="color:var(--orange);">${counts.kinda} Kinda</span>`);
+    if (counts.nailed) parts.push(`<span style="color:var(--green);">${counts.nailed} Nailed</span>`);
+    if (counts.skip) parts.push(`<span style="color:var(--text-dim);">${counts.skip} Skipped</span>`);
+    infoHtml += `<div style="margin-top:6px;">Reviewed ${total} time${total !== 1 ? 's' : ''}: ${parts.join(' &middot; ')}</div>`;
+  }
+
+  historyContent.innerHTML = infoHtml || '<div style="color:var(--text-dim);">No history yet</div>';
+
   showScreen('add-edit');
 }
 
@@ -3204,6 +3253,7 @@ async function lookupAddCard() {
     bucket: undefined,
     createdAt: now,
     source: 'Look Up',
+    sourceContext: document.getElementById('lookup-input').value.trim() || null,
     easeFactor: 2.5,
     interval: 0,
     repetitions: 0,
@@ -3300,6 +3350,7 @@ async function translateAddCard(index) {
     bucket: undefined,
     createdAt: now,
     source: 'Translate',
+    sourceContext: document.getElementById('translate-input').value.trim() || null,
     easeFactor: 2.5,
     interval: 0,
     repetitions: 0,
@@ -3387,6 +3438,7 @@ async function reverseAddCard(index) {
     bucket: undefined,
     createdAt: now,
     source: 'Reverse Lookup',
+    sourceContext: document.getElementById('reverse-input').value.trim() || null,
     easeFactor: 2.5,
     interval: 0,
     repetitions: 0,
@@ -3430,6 +3482,7 @@ async function addWordFromCritique(btn, phrase) {
       bucket: undefined,
       createdAt: now,
       source: 'Word Check',
+      sourceContext: `Checking "${phrase}" in: ${(document.getElementById('critique-sentence').value || '').trim()}`,
       easeFactor: 2.5,
       interval: 0,
       repetitions: 0,
@@ -3624,6 +3677,7 @@ async function polishAddCard(index) {
     bucket: undefined,
     createdAt: now,
     source: 'Polish',
+    sourceContext: document.getElementById('polish-input').value.trim() || null,
     easeFactor: 2.5,
     interval: 0,
     repetitions: 0,
@@ -3738,6 +3792,7 @@ async function verifyAddCard() {
     bucket: undefined,
     createdAt: now,
     source: 'Verify',
+    sourceContext: document.getElementById('verify-phrase').value.trim() || null,
     easeFactor: 2.5,
     interval: 0,
     repetitions: 0,
