@@ -320,14 +320,14 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       try {
         const _body2 = JSON.parse(body);
-        const { phrase, meaning } = _body2;
+        const { phrase, meaning, blankInstruction } = _body2;
         if (!phrase) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing phrase' }));
           return;
         }
 
-        const result = await generateBlankSentence(phrase, meaning || '', pickModel(_body2));
+        const result = await generateBlankSentence(phrase, meaning || '', pickModel(_body2), blankInstruction || '');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       } catch (err) {
@@ -1088,7 +1088,14 @@ async function generateExample(phrase, meaning, model) {
 }
 
 // Generate a fill-in-the-blank sentence
-async function generateBlankSentence(phrase, meaning, model) {
+async function generateBlankSentence(phrase, meaning, model, blankInstruction) {
+  const blankRules = blankInstruction
+    ? `IMPORTANT — The user has specified how to blank this phrase: "${blankInstruction}". Follow their instruction exactly for what to hide/show.`
+    : `Rules for choosing what to blank:
+- For multi-word phrases, usually blank only the key content word(s), not all words
+- Never blank only function words (e.g. "the", "a", "and", "in", "on", "to")
+- Keep it challenging but fair; avoid giveaways where almost the whole phrase is visible`;
+
   const payload = JSON.stringify({
     model: model || DEFAULT_MODEL,
     temperature: 0.7,
@@ -1103,10 +1110,7 @@ Given a phrase and meaning, generate:
 2. The exact missing answer text to blank from that phrase
 3. A short meaning/intention hint
 
-Rules for choosing what to blank:
-- For multi-word phrases, usually blank only the key content word(s), not all words
-- Never blank only function words (e.g. "the", "a", "and", "in", "on", "to")
-- Keep it challenging but fair; avoid giveaways where almost the whole phrase is visible
+${blankRules}
 - The answer must be a contiguous part of the original phrase text
 
 Respond in JSON with exactly these fields:
@@ -1159,10 +1163,12 @@ Only output valid JSON, nothing else.`
           const normalizedAnswer = normalizeToken(answer);
           const normalizedPhrase = phrase.trim().toLowerCase().replace(/\s+/g, ' ');
           const normalizedAnswerPhrase = answer.trim().toLowerCase().replace(/\s+/g, ' ');
-          const isWholePhraseForMultiWord =
+          // When user has a blankInstruction, trust the model's answer — skip safety guards
+          const hasUserBlankPref = !!blankInstruction;
+          const isWholePhraseForMultiWord = !hasUserBlankPref &&
             phrase.trim().split(/\s+/).length > 1 &&
             normalizedAnswerPhrase === normalizedPhrase;
-          const isLowInfoSingleWord =
+          const isLowInfoSingleWord = !hasUserBlankPref &&
             answer.split(/\s+/).length === 1 &&
             NON_BLANKABLE_FALLBACK.has(normalizedAnswer);
 
