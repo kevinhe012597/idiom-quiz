@@ -1150,6 +1150,7 @@ textarea { resize: vertical; min-height: 80px; }
         <button class="btn-secondary" onclick="showAddForm()">Add New Cards</button>
         <button class="btn-secondary" onclick="showLookup()">Look Up a Word</button>
         <button class="btn-secondary" onclick="showVerify()">Verify a Phrase</button>
+        <button class="btn-secondary" onclick="showScratchpad()" style="background:var(--surface1); border:1px dashed var(--text-dim);">📝 Scratchpad</button>
       </div>
       <div class="dashboard-sidebar">
         <div class="calendar-widget progress-tracker" id="daily-calendar">
@@ -1476,6 +1477,20 @@ textarea { resize: vertical; min-height: 80px; }
       <div class="verify-meaning" id="verify-meaning"></div>
     </div>
     <button class="btn-secondary" id="verify-add-btn" onclick="verifyAddCard()" style="width:100%; margin-top:12px; display:none;">Add to Deck</button>
+  </div>
+</div>
+
+<!-- Scratchpad Screen -->
+<div id="scratchpad" class="screen">
+  <div class="header">
+    <button class="back" onclick="showScreen('dashboard')">&larr;</button>
+    <h2>Scratchpad</h2>
+    <div></div>
+  </div>
+  <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:12px;">Jot down questions, ideas, or things to look up later. Auto-saved.</p>
+  <textarea id="scratchpad-input" placeholder="e.g. What's the difference between 'comprise' and 'compose'?&#10;&#10;Look up: words for describing someone who talks too much&#10;&#10;Is 'irregardless' actually a word?" style="width:100%; min-height:calc(100vh - 220px); padding:14px; border-radius:12px; border:1px solid var(--surface2); background:var(--surface1); color:var(--text); font-size:0.95rem; line-height:1.6; resize:none; font-family:inherit;" oninput="saveScratchpad()"></textarea>
+  <div style="display:flex; gap:8px; margin-top:10px;">
+    <button class="btn-secondary" onclick="clearScratchpad()" style="flex:1; font-size:0.85rem;">Clear All</button>
   </div>
 </div>
 </div>
@@ -3845,6 +3860,28 @@ function showVerify() {
   verifyData = null;
   showScreen('verify');
   document.getElementById('verify-phrase').focus();
+}
+
+// ─── Scratchpad ──────────────────────────────────────────────────────────
+
+const SCRATCHPAD_KEY = 'lexicon-scratchpad';
+
+function showScratchpad() {
+  const input = document.getElementById('scratchpad-input');
+  input.value = localStorage.getItem(SCRATCHPAD_KEY) || '';
+  showScreen('scratchpad');
+}
+
+function saveScratchpad() {
+  const text = document.getElementById('scratchpad-input').value;
+  localStorage.setItem(SCRATCHPAD_KEY, text);
+}
+
+function clearScratchpad() {
+  if (!confirm('Clear all scratchpad notes?')) return;
+  document.getElementById('scratchpad-input').value = '';
+  localStorage.removeItem(SCRATCHPAD_KEY);
+  showToast('Scratchpad cleared');
 }
 
 async function doVerify() {
