@@ -1444,6 +1444,14 @@ textarea { resize: vertical; min-height: 80px; }
 
   <div style="border-top:1px solid var(--surface2); margin:20px 0;"></div>
 
+  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Synonyms & Other Ways to Say It</label>
+  <input type="text" id="synonym-input" placeholder="e.g. angry, or 'ways to say I disagree'" autocomplete="off" style="margin-top:8px;">
+  <p style="color:var(--text-dim); font-size:0.75rem; margin:4px 0 8px;">Enter a word, phrase, or description — get synonyms, alternatives, and richer ways to express it.</p>
+  <button class="btn-primary" id="synonym-btn" onclick="doSynonyms()" style="width:100%;">Find Alternatives</button>
+  <div id="synonym-results" style="display:none;"></div>
+
+  <div style="border-top:1px solid var(--surface2); margin:20px 0;"></div>
+
   <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Polish my sentence</label>
   <textarea id="polish-input" placeholder="Type a rough sentence and I'll refine it..." rows="3" style="margin-top:8px;"></textarea>
   <button class="btn-primary" id="polish-btn" onclick="doPolish()" style="margin-top:8px; width:100%;">Polish</button>
@@ -3292,6 +3300,8 @@ function showLookup() {
   document.getElementById('critique-sentence').value = '';
   document.getElementById('critique-word').value = '';
   document.getElementById('critique-result').style.display = 'none';
+  document.getElementById('synonym-input').value = '';
+  document.getElementById('synonym-results').style.display = 'none';
   document.getElementById('polish-input').value = '';
   document.getElementById('polish-result').style.display = 'none';
   lookupData = null;
@@ -3608,6 +3618,110 @@ async function reverseAddCard(index) {
     btns[index].textContent = 'Added!';
     btns[index].disabled = true;
     btns[index].style.opacity = '0.5';
+  }
+}
+
+// ─── Synonyms & Other Ways to Say It ──────────────────────────────────
+
+async function doSynonyms() {
+  const input = document.getElementById('synonym-input');
+  const query = input.value.trim();
+  if (!query) { showToast('Enter a word or phrase first'); return; }
+
+  const btn = document.getElementById('synonym-btn');
+  btn.disabled = true;
+  btn.textContent = 'Searching...';
+
+  try {
+    const response = await apiFetch('/api/synonyms', { query });
+    if (!response.ok) throw new Error('Lookup failed');
+    const result = await response.json();
+    if (!result.groups || result.groups.length === 0) throw new Error('No results found');
+
+    const container = document.getElementById('synonym-results');
+    let html = '';
+
+    // If the input itself isn't a real word/phrase, show a note
+    if (result.note) {
+      html += `<div style="margin-top:12px; padding:10px; background:var(--surface1); border-radius:8px; font-size:0.85rem; color:var(--text-dim);">${escapeHtml(result.note)}</div>`;
+    }
+
+    result.groups.forEach((group, gi) => {
+      html += `<div style="margin-top:16px;">
+        <div style="font-size:0.8rem; font-weight:600; color:var(--accent); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">${escapeHtml(group.label)}</div>`;
+      group.items.forEach((item, ii) => {
+        const idx = gi * 100 + ii;
+        const isDupe = cards.some(c => c.phrase.toLowerCase() === item.phrase.toLowerCase());
+        html += `<div class="qa-card" style="margin-top:8px;">
+          <div class="qa-card-header">
+            <span class="phrase">${escapeHtml(item.phrase)}</span>
+            <button class="btn-speak btn-speak-inline" onclick="speakText(this, '${escapeHtml(item.phrase).replace(/'/g, "\\'")}')" title="Hear pronunciation">&#128264;</button>
+            <span class="tag">${escapeHtml(item.register || 'neutral')}</span>
+            ${isDupe ? '<span class="dupe-tag">already in deck</span>' : ''}
+          </div>
+          <div style="margin-top:6px;">
+            <div style="font-size:0.9rem;">${escapeHtml(item.meaning)}</div>
+          </div>
+          <div class="example-row">
+            <span class="example-text">${escapeHtml(item.example)}</span>
+          </div>
+          ${item.nuance ? `<div style="font-size:0.8rem; color:var(--text-dim); margin-top:4px; font-style:italic;">💡 ${escapeHtml(item.nuance)}</div>` : ''}
+          <button class="btn-primary" onclick="synonymAddCard(${idx})" style="margin-top:8px; width:100%; padding:10px; font-size:0.9rem;"
+            ${isDupe ? 'disabled style="margin-top:8px; width:100%; padding:10px; font-size:0.9rem; opacity:0.5;"' : ''}>
+            ${isDupe ? 'Already in Deck' : 'Add to Deck'}
+          </button>
+        </div>`;
+      });
+      html += `</div>`;
+    });
+
+    container.innerHTML = html;
+    container.style.display = 'block';
+    window._synonymResults = result.groups;
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Find Alternatives';
+  }
+}
+
+async function synonymAddCard(flatIndex) {
+  const gi = Math.floor(flatIndex / 100);
+  const ii = flatIndex % 100;
+  const item = window._synonymResults[gi]?.items[ii];
+  if (!item) return;
+  const today = getToday();
+  const now = new Date().toISOString();
+
+  cards.unshift({
+    id: generateId(),
+    phrase: item.phrase,
+    meaning: item.meaning || '',
+    example: item.example || '',
+    category: item.category || 'word',
+    bucket: undefined,
+    createdAt: now,
+    source: 'Synonyms Lookup',
+    sourceContext: document.getElementById('synonym-input').value.trim() || null,
+    easeFactor: 2.5,
+    interval: 0,
+    repetitions: 0,
+    nextReview: today,
+    lastReview: null
+  });
+
+  await saveCards(cards);
+  updateDashboard();
+  showToast(`Added "${item.phrase}" to deck`);
+
+  // Update the button
+  const btns = document.querySelectorAll('#synonym-results .btn-primary');
+  const btnIndex = Array.from(btns).findIndex(b => b.onclick?.toString().includes(`synonymAddCard(${flatIndex})`));
+  if (btnIndex >= 0 && btns[btnIndex]) {
+    btns[btnIndex].textContent = 'Added!';
+    btns[btnIndex].disabled = true;
+    btns[btnIndex].style.opacity = '0.5';
   }
 }
 

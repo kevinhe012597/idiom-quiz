@@ -599,6 +599,100 @@ Please redefine this card according to the user's feedback.`
     return;
   }
 
+  // Synonyms & other ways to say it
+  if (req.method === 'POST' && req.url === '/api/synonyms') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { query } = _body;
+        if (!query) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing query' }));
+          return;
+        }
+
+        const payload = JSON.stringify({
+          model: pickModel(_body),
+          messages: [
+            {
+              role: 'system',
+              content: `You are a vocabulary and thesaurus expert. The user will give you a word, phrase, or a description of what they're trying to say. Your job is to find synonyms, alternative phrases, and richer ways to express the same idea.
+
+Organize results into 2-4 groups by register/context (e.g. "Formal Alternatives", "Casual / Conversational", "Idioms & Expressions", "Precise / Academic"). Each group should have 2-4 items.
+
+For each item provide:
+- phrase: the word or phrase
+- category: "word", "phrase", or "idiom"
+- meaning: a concise definition
+- example: a natural example sentence
+- register: one of "formal", "casual", "neutral", "literary", "slang"
+- nuance: a short note on when to use this vs the original (optional, only if helpful)
+
+If the input isn't a standard word/phrase but rather a description (like "ways to say I'm angry"), still find the best matches.
+
+If the input word/phrase is uncommon or possibly confused with something else, include a "note" field at the top level explaining this.
+
+Return JSON: {"note":"optional note","groups":[{"label":"Group Name","items":[{"phrase":"...","category":"...","meaning":"...","example":"...","register":"...","nuance":"..."}]}]}`
+            },
+            {
+              role: 'user',
+              content: query
+            }
+          ],
+          temperature: 0.8
+        });
+
+        const https = require('https');
+        const options = {
+          hostname: 'api.openai.com',
+          path: '/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        const apiReq = https.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `OpenAI API error: ${apiRes.statusCode}` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices[0].message.content.trim();
+              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+              const result = JSON.parse(jsonStr);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   // Chinese → English translate + key phrases endpoint
   if (req.method === 'POST' && req.url === '/api/translate-zh') {
     let body = '';
