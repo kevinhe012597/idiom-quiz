@@ -1492,9 +1492,11 @@ textarea { resize: vertical; min-height: 80px; }
       <span class="lookup-section-chevron" id="chevron-complete">▸</span>
     </div>
     <div class="lookup-section-body" id="body-complete" style="display:none;">
+      <label style="font-size:0.8rem; color:var(--text-dim); margin-bottom:4px; display:block;">Sentence</label>
       <input type="text" id="complete-input" placeholder="e.g. What's the saying they are on their last…" autocomplete="off">
-      <p style="color:var(--text-dim); font-size:0.75rem; margin:4px 0 8px;">Type the sentence with the missing word and describe what you mean.</p>
-      <button class="btn-primary" id="complete-btn" onclick="doComplete()" style="width:100%;">Find the Word</button>
+      <label style="font-size:0.8rem; color:var(--text-dim); margin:10px 0 4px; display:block;">Meaning</label>
+      <input type="text" id="complete-meaning" placeholder="e.g. They are desperate and have nothing to lose" autocomplete="off">
+      <button class="btn-primary" id="complete-btn" onclick="doComplete()" style="width:100%; margin-top:10px;">Find the Word</button>
       <div id="complete-result" style="display:none;"></div>
     </div>
   </div>
@@ -3458,7 +3460,7 @@ let lookupData = null;
 
 function showLookup() {
   // Clear all inputs and results
-  ['lookup-input','translate-input','reverse-input','critique-sentence','critique-word','synonym-input','polish-input','complete-input','en2zh-input'].forEach(id => {
+  ['lookup-input','translate-input','reverse-input','critique-sentence','critique-word','synonym-input','polish-input','complete-input','complete-meaning','en2zh-input'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -4154,14 +4156,15 @@ async function polishAddCard(index) {
 async function doComplete() {
   const input = document.getElementById('complete-input');
   const text = input.value.trim();
-  if (!text) { showToast('Type your sentence first'); return; }
+  const meaning = (document.getElementById('complete-meaning')?.value || '').trim();
+  if (!text && !meaning) { showToast('Type your sentence or meaning first'); return; }
 
   const btn = document.getElementById('complete-btn');
   btn.disabled = true;
   btn.textContent = 'Thinking...';
 
   try {
-    const response = await apiFetch('/api/complete-sentence', { text });
+    const response = await apiFetch('/api/complete-sentence', { text, meaning });
     if (!response.ok) throw new Error('API error');
     const result = await response.json();
     const container = document.getElementById('complete-result');

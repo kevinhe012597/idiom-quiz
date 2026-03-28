@@ -700,19 +700,21 @@ Return JSON: {"note":"optional note","groups":[{"label":"Group Name","items":[{"
     req.on('end', async () => {
       try {
         const _body = JSON.parse(body);
-        const { text } = _body;
-        if (!text) {
+        const { text, meaning } = _body;
+        if (!text && !meaning) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Missing text' }));
+          res.end(JSON.stringify({ error: 'Missing text or meaning' }));
           return;
         }
+
+        const userMessage = [text && `Sentence: ${text}`, meaning && `Meaning: ${meaning}`].filter(Boolean).join('\n');
 
         const payload = JSON.stringify({
           model: pickModel(_body),
           messages: [
             {
               role: 'system',
-              content: `You are a vocabulary and idiom expert. The user has a partial sentence or description where they know what they want to say but can't think of the exact word, phrase, or idiom. Help them find it.
+              content: `You are a vocabulary and idiom expert. The user has a partial sentence where they can't think of the exact word, phrase, or idiom. They may provide the sentence, the intended meaning, or both. Help them find the missing word.
 
 1. Complete their sentence with the most likely word/phrase/idiom they're looking for.
 2. Provide the full completed sentence.
@@ -726,7 +728,7 @@ Return JSON:
   ]
 }`
             },
-            { role: 'user', content: text }
+            { role: 'user', content: userMessage }
           ],
           temperature: 0.7
         });
