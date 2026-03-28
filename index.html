@@ -883,6 +883,53 @@ textarea { resize: vertical; min-height: 80px; }
   width: auto;
   padding: 12px 20px;
 }
+.lookup-section {
+  background: var(--surface);
+  border: 1px solid var(--surface2);
+  border-radius: 14px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.lookup-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.lookup-section-header:active { background: var(--surface1); }
+.lookup-section-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lookup-section-icon { font-size: 1.3rem; flex-shrink: 0; }
+.lookup-section-name { font-weight: 600; font-size: 0.95rem; color: var(--text); }
+.lookup-section-desc { font-size: 0.75rem; color: var(--text-dim); margin-top: 2px; }
+.lookup-section-chevron {
+  font-size: 1rem;
+  color: var(--text-dim);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+.lookup-section-chevron.open { transform: rotate(90deg); }
+.lookup-section-body { padding: 0 16px 16px; }
+.lookup-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.lookup-clear-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.lookup-clear-btn:hover { color: var(--danger); }
 
 .verify-feedback {
   background: var(--surface);
@@ -1143,13 +1190,12 @@ textarea { resize: vertical; min-height: 80px; }
     </div>
     <div class="dashboard-bottom">
       <div class="dashboard-actions">
+        <button class="btn-primary" onclick="showLookup()" style="background:var(--accent); font-size:1rem;">Look Up a Word</button>
         <button class="btn-primary" id="start-fill-blank-btn" onclick="openFillBlankTargetDialog()">Fill in the Blank</button>
         <button class="btn-primary" id="start-daily-btn" onclick="startDailyMode()" style="background:var(--blue)">Daily Mode</button>
         <button class="btn-primary" id="start-write-sentence-btn" onclick="startWriteSentence()" style="background:var(--accent2)">Write a Sentence</button>
         <button class="btn-secondary" onclick="activeBucket=null;showScreen('browse')">Browse All Cards</button>
         <button class="btn-secondary" onclick="showAddForm()">Add New Cards</button>
-        <button class="btn-secondary" onclick="showLookup()">Look Up a Word</button>
-        <button class="btn-secondary" onclick="showVerify()">Verify a Phrase</button>
         <button class="btn-secondary" onclick="showScratchpad()" style="background:var(--surface1); border:1px dashed var(--text-dim);">📝 Scratchpad</button>
       </div>
       <div class="dashboard-sidebar">
@@ -1384,78 +1430,198 @@ textarea { resize: vertical; min-height: 80px; }
     <h2>Look Up</h2>
     <div></div>
   </div>
-  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Look up a specific word</label>
-  <div class="lookup-input-row">
-    <input type="text" id="lookup-input" placeholder="Type a word or phrase..." autocomplete="off">
-    <button class="btn-primary" id="lookup-btn" onclick="doLookup()">Look Up</button>
-  </div>
-  <div id="lookup-result" style="display:none;">
-    <div id="lookup-validation" style="display:none; margin-bottom:12px; padding:12px 14px; background:rgba(255,180,0,0.12); border:1px solid rgba(255,180,0,0.3); border-radius:10px;">
-      <div style="font-size:0.9rem; font-weight:600; color:#e6a700; margin-bottom:8px;">⚠️ This doesn't appear to be a standard English expression</div>
-      <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:6px;">Did you mean:</div>
-      <div id="lookup-suggestions" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+
+  <!-- 1. Look up a specific word -->
+  <div class="lookup-section" id="lookup-section-word">
+    <div class="lookup-section-header" onclick="toggleLookupSection('word')">
+      <div class="lookup-section-title">
+        <span class="lookup-section-icon">🔍</span>
+        <div>
+          <div class="lookup-section-name">Look up a word</div>
+          <div class="lookup-section-desc">Get the definition, meaning, and examples</div>
+        </div>
+      </div>
+      <span class="lookup-section-chevron" id="chevron-word">▸</span>
     </div>
-    <div class="qa-card" id="lookup-card">
-      <div class="qa-card-header">
-        <span class="phrase" id="lookup-phrase"></span>
-        <button class="btn-speak btn-speak-inline" onclick="speakText(this, document.getElementById('lookup-phrase').textContent)" title="Hear pronunciation">&#128264;</button>
-        <span class="tag" id="lookup-category"></span>
-        <span class="dupe-tag" id="lookup-dupe" style="display:none;">already in deck</span>
+    <div class="lookup-section-body" id="body-word" style="display:none;">
+      <div class="lookup-input-row">
+        <input type="text" id="lookup-input" placeholder="Type a word or phrase..." autocomplete="off">
+        <button class="btn-primary" id="lookup-btn" onclick="doLookup()">Look Up</button>
       </div>
-      <div style="margin-top:8px;">
-        <label style="font-size:0.8rem; color:var(--text-dim);">Meaning</label>
-        <div id="lookup-meaning" style="font-size:0.95rem; margin-top:4px;"></div>
-      </div>
-      <div class="example-row">
-        <span class="example-text" id="lookup-example"></span>
-        <button class="regen-btn" onclick="lookupRegenExample()">↻ New example</button>
+      <div id="lookup-result" style="display:none;">
+        <div class="lookup-result-header">
+          <span style="font-weight:600; font-size:0.8rem; color:var(--text-dim);">Result</span>
+          <button class="lookup-clear-btn" onclick="clearLookupResult('lookup-result')">✕ Clear</button>
+        </div>
+        <div id="lookup-validation" style="display:none; margin-bottom:12px; padding:12px 14px; background:rgba(255,180,0,0.12); border:1px solid rgba(255,180,0,0.3); border-radius:10px;">
+          <div style="font-size:0.9rem; font-weight:600; color:#e6a700; margin-bottom:8px;">⚠️ This doesn't appear to be a standard English expression</div>
+          <div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:6px;">Did you mean:</div>
+          <div id="lookup-suggestions" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+        </div>
+        <div class="qa-card" id="lookup-card">
+          <div class="qa-card-header">
+            <span class="phrase" id="lookup-phrase"></span>
+            <button class="btn-speak btn-speak-inline" onclick="speakText(this, document.getElementById('lookup-phrase').textContent)" title="Hear pronunciation">&#128264;</button>
+            <span class="tag" id="lookup-category"></span>
+            <span class="dupe-tag" id="lookup-dupe" style="display:none;">already in deck</span>
+          </div>
+          <div style="margin-top:8px;">
+            <label style="font-size:0.8rem; color:var(--text-dim);">Meaning</label>
+            <div id="lookup-meaning" style="font-size:0.95rem; margin-top:4px;"></div>
+          </div>
+          <div class="example-row">
+            <span class="example-text" id="lookup-example"></span>
+            <button class="regen-btn" onclick="lookupRegenExample()">↻ New example</button>
+          </div>
+        </div>
+        <button class="btn-primary" id="lookup-add-btn" onclick="lookupAddCard()" style="margin-top:12px; width:100%;">Add to Deck</button>
       </div>
     </div>
-    <button class="btn-primary" id="lookup-add-btn" onclick="lookupAddCard()" style="margin-top:12px; width:100%;">Add to Deck</button>
   </div>
 
-  <div style="border-top:1px solid var(--surface2); margin:20px 0;"></div>
-
-  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Translate Chinese → English</label>
-  <div class="lookup-input-row" style="margin-top:8px;">
-    <input type="text" id="translate-input" placeholder="输入中文..." autocomplete="off">
-    <button class="btn-primary" id="translate-btn" onclick="doTranslate()">Translate</button>
+  <!-- 2. Complete my sentence -->
+  <div class="lookup-section" id="lookup-section-complete">
+    <div class="lookup-section-header" onclick="toggleLookupSection('complete')">
+      <div class="lookup-section-title">
+        <span class="lookup-section-icon">💬</span>
+        <div>
+          <div class="lookup-section-name">Complete my sentence</div>
+          <div class="lookup-section-desc">You know the sentence but can't think of the word</div>
+        </div>
+      </div>
+      <span class="lookup-section-chevron" id="chevron-complete">▸</span>
+    </div>
+    <div class="lookup-section-body" id="body-complete" style="display:none;">
+      <input type="text" id="complete-input" placeholder="e.g. What's the saying they are on their last…" autocomplete="off">
+      <p style="color:var(--text-dim); font-size:0.75rem; margin:4px 0 8px;">Type the sentence with the missing word and describe what you mean.</p>
+      <button class="btn-primary" id="complete-btn" onclick="doComplete()" style="width:100%;">Find the Word</button>
+      <div id="complete-result" style="display:none;"></div>
+    </div>
   </div>
-  <div id="translate-result" style="display:none;"></div>
 
-  <div style="border-top:1px solid var(--surface2); margin:20px 0;"></div>
-
-  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Describe what you mean</label>
-  <div class="lookup-input-row">
-    <input type="text" id="reverse-input" placeholder="e.g. People who approve things without doing the real work..." autocomplete="off">
-    <button class="btn-primary" id="reverse-btn" onclick="doReverseLookup()">Find</button>
+  <!-- 3. Describe what you mean -->
+  <div class="lookup-section" id="lookup-section-reverse">
+    <div class="lookup-section-header" onclick="toggleLookupSection('reverse')">
+      <div class="lookup-section-title">
+        <span class="lookup-section-icon">🧠</span>
+        <div>
+          <div class="lookup-section-name">Describe what you mean</div>
+          <div class="lookup-section-desc">Describe a concept, get the word or phrase for it</div>
+        </div>
+      </div>
+      <span class="lookup-section-chevron" id="chevron-reverse">▸</span>
+    </div>
+    <div class="lookup-section-body" id="body-reverse" style="display:none;">
+      <div class="lookup-input-row">
+        <input type="text" id="reverse-input" placeholder="e.g. People who approve things without doing the real work..." autocomplete="off">
+        <button class="btn-primary" id="reverse-btn" onclick="doReverseLookup()">Find</button>
+      </div>
+      <div id="reverse-results" style="display:none;"></div>
+    </div>
   </div>
-  <div id="reverse-results" style="display:none;"></div>
 
-  <div style="border-top:1px solid var(--surface2); margin:20px 0;"></div>
-
-  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Check my word choice</label>
-  <textarea id="critique-sentence" placeholder="Type your sentence here..." rows="2" style="margin-top:8px;"></textarea>
-  <div class="lookup-input-row" style="margin-top:8px;">
-    <input type="text" id="critique-word" placeholder="Which word are you unsure about?" autocomplete="off">
-    <button class="btn-primary" id="critique-btn" onclick="doCritique()">Check</button>
+  <!-- 4. Synonyms -->
+  <div class="lookup-section" id="lookup-section-synonyms">
+    <div class="lookup-section-header" onclick="toggleLookupSection('synonyms')">
+      <div class="lookup-section-title">
+        <span class="lookup-section-icon">🔄</span>
+        <div>
+          <div class="lookup-section-name">Synonyms & alternatives</div>
+          <div class="lookup-section-desc">Find other ways to say the same thing</div>
+        </div>
+      </div>
+      <span class="lookup-section-chevron" id="chevron-synonyms">▸</span>
+    </div>
+    <div class="lookup-section-body" id="body-synonyms" style="display:none;">
+      <input type="text" id="synonym-input" placeholder="e.g. angry, or 'ways to say I disagree'" autocomplete="off">
+      <p style="color:var(--text-dim); font-size:0.75rem; margin:4px 0 8px;">Enter a word, phrase, or description — get synonyms grouped by register.</p>
+      <button class="btn-primary" id="synonym-btn" onclick="doSynonyms()" style="width:100%;">Find Alternatives</button>
+      <div id="synonym-results" style="display:none;"></div>
+    </div>
   </div>
-  <div id="critique-result" style="display:none;"></div>
 
-  <div style="border-top:1px solid var(--surface2); margin:20px 0;"></div>
+  <!-- 5. Check my word choice -->
+  <div class="lookup-section" id="lookup-section-critique">
+    <div class="lookup-section-header" onclick="toggleLookupSection('critique')">
+      <div class="lookup-section-title">
+        <span class="lookup-section-icon">✅</span>
+        <div>
+          <div class="lookup-section-name">Check my word choice</div>
+          <div class="lookup-section-desc">Verify you're using a word correctly in context</div>
+        </div>
+      </div>
+      <span class="lookup-section-chevron" id="chevron-critique">▸</span>
+    </div>
+    <div class="lookup-section-body" id="body-critique" style="display:none;">
+      <textarea id="critique-sentence" placeholder="Type your sentence here..." rows="2"></textarea>
+      <div class="lookup-input-row" style="margin-top:8px;">
+        <input type="text" id="critique-word" placeholder="Which word are you unsure about?" autocomplete="off">
+        <button class="btn-primary" id="critique-btn" onclick="doCritique()">Check</button>
+      </div>
+      <div id="critique-result" style="display:none;"></div>
+    </div>
+  </div>
 
-  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Synonyms & Other Ways to Say It</label>
-  <input type="text" id="synonym-input" placeholder="e.g. angry, or 'ways to say I disagree'" autocomplete="off" style="margin-top:8px;">
-  <p style="color:var(--text-dim); font-size:0.75rem; margin:4px 0 8px;">Enter a word, phrase, or description — get synonyms, alternatives, and richer ways to express it.</p>
-  <button class="btn-primary" id="synonym-btn" onclick="doSynonyms()" style="width:100%;">Find Alternatives</button>
-  <div id="synonym-results" style="display:none;"></div>
+  <!-- 6. Polish my sentence -->
+  <div class="lookup-section" id="lookup-section-polish">
+    <div class="lookup-section-header" onclick="toggleLookupSection('polish')">
+      <div class="lookup-section-title">
+        <span class="lookup-section-icon">✨</span>
+        <div>
+          <div class="lookup-section-name">Polish my sentence</div>
+          <div class="lookup-section-desc">Refine a rough sentence into polished English</div>
+        </div>
+      </div>
+      <span class="lookup-section-chevron" id="chevron-polish">▸</span>
+    </div>
+    <div class="lookup-section-body" id="body-polish" style="display:none;">
+      <textarea id="polish-input" placeholder="Type a rough sentence and I'll refine it..." rows="3"></textarea>
+      <button class="btn-primary" id="polish-btn" onclick="doPolish()" style="margin-top:8px; width:100%;">Polish</button>
+      <div id="polish-result" style="display:none;"></div>
+    </div>
+  </div>
 
-  <div style="border-top:1px solid var(--surface2); margin:20px 0;"></div>
+  <!-- 7. Translate Chinese → English -->
+  <div class="lookup-section" id="lookup-section-zh2en">
+    <div class="lookup-section-header" onclick="toggleLookupSection('zh2en')">
+      <div class="lookup-section-title">
+        <span class="lookup-section-icon">🇨🇳→🇺🇸</span>
+        <div>
+          <div class="lookup-section-name">Chinese → English</div>
+          <div class="lookup-section-desc">Translate Chinese and learn key phrases</div>
+        </div>
+      </div>
+      <span class="lookup-section-chevron" id="chevron-zh2en">▸</span>
+    </div>
+    <div class="lookup-section-body" id="body-zh2en" style="display:none;">
+      <div class="lookup-input-row">
+        <input type="text" id="translate-input" placeholder="输入中文..." autocomplete="off">
+        <button class="btn-primary" id="translate-btn" onclick="doTranslate()">Translate</button>
+      </div>
+      <div id="translate-result" style="display:none;"></div>
+    </div>
+  </div>
 
-  <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Polish my sentence</label>
-  <textarea id="polish-input" placeholder="Type a rough sentence and I'll refine it..." rows="3" style="margin-top:8px;"></textarea>
-  <button class="btn-primary" id="polish-btn" onclick="doPolish()" style="margin-top:8px; width:100%;">Polish</button>
-  <div id="polish-result" style="display:none;"></div>
+  <!-- 8. Translate English → Chinese -->
+  <div class="lookup-section" id="lookup-section-en2zh">
+    <div class="lookup-section-header" onclick="toggleLookupSection('en2zh')">
+      <div class="lookup-section-title">
+        <span class="lookup-section-icon">🇺🇸→🇨🇳</span>
+        <div>
+          <div class="lookup-section-name">English → Chinese</div>
+          <div class="lookup-section-desc">Translate English to Chinese with pinyin</div>
+        </div>
+      </div>
+      <span class="lookup-section-chevron" id="chevron-en2zh">▸</span>
+    </div>
+    <div class="lookup-section-body" id="body-en2zh" style="display:none;">
+      <div class="lookup-input-row">
+        <input type="text" id="en2zh-input" placeholder="Type English text..." autocomplete="off">
+        <button class="btn-primary" id="en2zh-btn" onclick="doTranslateEn2Zh()">Translate</button>
+      </div>
+      <div id="en2zh-result" style="display:none;"></div>
+    </div>
+  </div>
 </div>
 
 <!-- Verify a Phrase Screen -->
@@ -3291,21 +3457,38 @@ function cancelEdit() {
 let lookupData = null;
 
 function showLookup() {
-  document.getElementById('lookup-input').value = '';
-  document.getElementById('lookup-result').style.display = 'none';
-  document.getElementById('translate-input').value = '';
-  document.getElementById('translate-result').style.display = 'none';
-  document.getElementById('reverse-input').value = '';
-  document.getElementById('reverse-results').style.display = 'none';
-  document.getElementById('critique-sentence').value = '';
-  document.getElementById('critique-word').value = '';
-  document.getElementById('critique-result').style.display = 'none';
-  document.getElementById('synonym-input').value = '';
-  document.getElementById('synonym-results').style.display = 'none';
-  document.getElementById('polish-input').value = '';
-  document.getElementById('polish-result').style.display = 'none';
+  // Clear all inputs and results
+  ['lookup-input','translate-input','reverse-input','critique-sentence','critique-word','synonym-input','polish-input','complete-input','en2zh-input'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  ['lookup-result','translate-result','reverse-results','critique-result','synonym-results','polish-result','complete-result','en2zh-result'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  // Collapse all sections
+  ['word','complete','reverse','synonyms','critique','polish','zh2en','en2zh'].forEach(key => {
+    const body = document.getElementById('body-' + key);
+    const chev = document.getElementById('chevron-' + key);
+    if (body) body.style.display = 'none';
+    if (chev) chev.classList.remove('open');
+  });
   lookupData = null;
   showScreen('lookup');
+}
+
+function toggleLookupSection(key) {
+  const body = document.getElementById('body-' + key);
+  const chev = document.getElementById('chevron-' + key);
+  if (!body) return;
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  if (chev) chev.classList.toggle('open', !isOpen);
+}
+
+function clearLookupResult(resultId) {
+  const el = document.getElementById(resultId);
+  if (el) el.style.display = 'none';
 }
 
 async function doLookup() {
@@ -3479,7 +3662,8 @@ async function doTranslate() {
     }).join('');
 
     container.innerHTML = `
-      <div class="qa-card" style="margin-top:12px; background:var(--surface2);">
+      <div class="lookup-result-header"><span style="font-weight:600; font-size:0.8rem; color:var(--text-dim);">Result</span><button class="lookup-clear-btn" onclick="clearLookupResult('translate-result')">✕ Clear</button></div>
+      <div class="qa-card" style="background:var(--surface2);">
         <label style="font-size:0.8rem; color:var(--text-dim);">Translation</label>
         <div style="font-size:1rem; margin-top:6px; line-height:1.5;">${escapeHtml(result.translation)}</div>
         <button class="btn-speak btn-speak-inline" onclick="speakText(this, '${escapeHtml(result.translation).replace(/'/g, "\\'")}')" title="Hear translation" style="margin-top:8px;">&#128264;</button>
@@ -3551,9 +3735,9 @@ async function doReverseLookup() {
     if (!results || results.length === 0) throw new Error('No results found');
 
     const container = document.getElementById('reverse-results');
-    container.innerHTML = results.map((r, i) => {
+    container.innerHTML = `<div class="lookup-result-header"><span style="font-weight:600; font-size:0.8rem; color:var(--text-dim);">Result</span><button class="lookup-clear-btn" onclick="clearLookupResult('reverse-results')">✕ Clear</button></div>` + results.map((r, i) => {
       const isDupe = cards.some(c => c.phrase.toLowerCase() === r.phrase.toLowerCase());
-      return `<div class="qa-card" style="margin-top:12px;">
+      return `<div class="qa-card" style="margin-top:10px;">
         <div class="qa-card-header">
           <span class="phrase">${escapeHtml(r.phrase)}</span>
           <button class="btn-speak btn-speak-inline" onclick="speakText(this, '${escapeHtml(r.phrase).replace(/'/g, "\\'")}')" title="Hear pronunciation">&#128264;</button>
@@ -3675,7 +3859,7 @@ async function doSynonyms() {
       html += `</div>`;
     });
 
-    container.innerHTML = html;
+    container.innerHTML = `<div class="lookup-result-header"><span style="font-weight:600; font-size:0.8rem; color:var(--text-dim);">Result</span><button class="lookup-clear-btn" onclick="clearLookupResult('synonym-results')">✕ Clear</button></div>` + html;
     container.style.display = 'block';
     window._synonymResults = result.groups;
   } catch (err) {
@@ -3809,7 +3993,8 @@ async function doCritique() {
 
     const container = document.getElementById('critique-result');
     container.innerHTML = `
-      <div class="qa-card" style="margin-top:12px; border-left:4px solid ${v.border};">
+      <div class="lookup-result-header"><span style="font-weight:600; font-size:0.8rem; color:var(--text-dim);">Result</span><button class="lookup-clear-btn" onclick="clearLookupResult('critique-result')">✕ Clear</button></div>
+      <div class="qa-card" style="border-left:4px solid ${v.border};">
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
           <span style="font-size:1.4rem; color:${v.text};">${v.icon}</span>
           <span style="font-size:1.1rem; font-weight:700; color:${v.text}; text-transform:capitalize;">${escapeHtml(result.verdict)}</span>
@@ -3908,7 +4093,8 @@ async function doPolish() {
 
     const container = document.getElementById('polish-result');
     container.innerHTML = `
-      <div class="qa-card" style="margin-top:12px; background:var(--surface2);">
+      <div class="lookup-result-header"><span style="font-weight:600; font-size:0.8rem; color:var(--text-dim);">Result</span><button class="lookup-clear-btn" onclick="clearLookupResult('polish-result')">✕ Clear</button></div>
+      <div class="qa-card" style="background:var(--surface2);">
         <label style="font-size:0.8rem; color:var(--text-dim);">Polished</label>
         <div style="font-size:1rem; margin-top:6px; line-height:1.5; font-weight:500;">${escapeHtml(result.polished)}</div>
         <button class="btn-speak btn-speak-inline" onclick="speakText(this, '${escapeHtml(result.polished).replace(/'/g, "\\'")}')" title="Hear polished sentence" style="margin-top:8px;">&#128264;</button>
@@ -3960,6 +4146,111 @@ async function polishAddCard(index) {
     buttons[index].textContent = 'Added ✓';
     buttons[index].disabled = true;
     buttons[index].style.opacity = '0.5';
+  }
+}
+
+// ─── Complete my sentence ────────────────────────────────────────────────
+
+async function doComplete() {
+  const input = document.getElementById('complete-input');
+  const text = input.value.trim();
+  if (!text) { showToast('Type your sentence first'); return; }
+
+  const btn = document.getElementById('complete-btn');
+  btn.disabled = true;
+  btn.textContent = 'Thinking...';
+
+  try {
+    const response = await apiFetch('/api/complete-sentence', { text });
+    if (!response.ok) throw new Error('API error');
+    const result = await response.json();
+    const container = document.getElementById('complete-result');
+
+    let html = `<div class="lookup-result-header"><span style="font-weight:600; font-size:0.8rem; color:var(--text-dim);">Result</span><button class="lookup-clear-btn" onclick="clearLookupResult('complete-result')">✕ Clear</button></div>`;
+    html += `<div style="background:var(--surface1); border-radius:10px; padding:14px; margin-bottom:12px;">`;
+    html += `<div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:4px;">Completed sentence</div>`;
+    html += `<div style="font-size:1rem; font-weight:500;">${result.completedSentence}</div>`;
+    html += `</div>`;
+
+    if (result.phrases && result.phrases.length) {
+      result.phrases.forEach((p, i) => {
+        const isDupe = cards.some(c => c.phrase.toLowerCase() === p.phrase.toLowerCase());
+        html += `<div class="qa-card" style="margin-bottom:10px;">`;
+        html += `<div class="qa-card-header">`;
+        html += `<span class="phrase">${p.phrase}</span>`;
+        html += `<button class="btn-speak btn-speak-inline" onclick="speakText(this, '${p.phrase.replace(/'/g, "\\'")}')" title="Hear pronunciation">&#128264;</button>`;
+        html += `<span class="tag">${p.category || 'phrase'}</span>`;
+        if (isDupe) html += `<span class="dupe-tag">already in deck</span>`;
+        html += `</div>`;
+        html += `<div style="margin-top:6px;"><span style="font-size:0.8rem; color:var(--text-dim);">Meaning</span><div style="font-size:0.9rem; margin-top:2px;">${p.meaning}</div></div>`;
+        html += `<div class="example-row"><span class="example-text">${p.example}</span></div>`;
+        if (!isDupe) html += `<button class="btn-secondary" onclick="completeAddCard(${i})" style="width:100%; margin-top:8px; font-size:0.85rem;">Add to Deck</button>`;
+        html += `</div>`;
+      });
+    }
+    container.innerHTML = html;
+    container.style.display = 'block';
+    window._completeResult = result;
+  } catch (err) {
+    showToast('Failed to complete sentence');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Find the Word';
+  }
+}
+
+function completeAddCard(idx) {
+  const p = window._completeResult?.phrases?.[idx];
+  if (!p) return;
+  const isDupe = cards.some(c => c.phrase.toLowerCase() === p.phrase.toLowerCase());
+  if (isDupe) { showToast('Already in deck'); return; }
+  cards.push({
+    phrase: p.phrase,
+    meaning: p.meaning,
+    example: p.example,
+    category: p.category || 'phrase',
+    source: 'Complete Sentence',
+    sourceContext: document.getElementById('complete-input').value.trim(),
+    dateAdded: new Date().toISOString(),
+    ratingHistory: { nailed: 0, kinda: 0, nope: 0 },
+    easeFactor: 2.5, interval: 0, repetitions: 0,
+    nextReview: getToday(), lastReview: null,
+  });
+  saveCards(cards);
+  showToast(`Added "${p.phrase}"`);
+  doComplete(); // re-render to show dupe tag
+}
+
+// ─── English → Chinese ──────────────────────────────────────────────────
+
+async function doTranslateEn2Zh() {
+  const input = document.getElementById('en2zh-input');
+  const text = input.value.trim();
+  if (!text) { showToast('Type English text first'); return; }
+
+  const btn = document.getElementById('en2zh-btn');
+  btn.disabled = true;
+  btn.textContent = 'Translating...';
+
+  try {
+    const response = await apiFetch('/api/translate-en2zh', { text });
+    if (!response.ok) throw new Error('API error');
+    const result = await response.json();
+    const container = document.getElementById('en2zh-result');
+
+    let html = `<div class="lookup-result-header"><span style="font-weight:600; font-size:0.8rem; color:var(--text-dim);">Translation</span><button class="lookup-clear-btn" onclick="clearLookupResult('en2zh-result')">✕ Clear</button></div>`;
+    html += `<div style="background:var(--surface1); border-radius:10px; padding:14px;">`;
+    html += `<div style="font-size:1.1rem; font-weight:500; margin-bottom:6px;">${result.translation}</div>`;
+    if (result.pinyin) html += `<div style="font-size:0.85rem; color:var(--text-dim);">${result.pinyin}</div>`;
+    if (result.notes) html += `<div style="font-size:0.85rem; color:var(--text-dim); margin-top:8px; border-top:1px solid var(--surface2); padding-top:8px;">${result.notes}</div>`;
+    html += `</div>`;
+    container.innerHTML = html;
+    container.style.display = 'block';
+  } catch (err) {
+    showToast('Translation failed');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Translate';
   }
 }
 

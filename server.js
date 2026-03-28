@@ -693,6 +693,173 @@ Return JSON: {"note":"optional note","groups":[{"label":"Group Name","items":[{"
     return;
   }
 
+  // Complete my sentence endpoint
+  if (req.method === 'POST' && req.url === '/api/complete-sentence') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { text } = _body;
+        if (!text) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing text' }));
+          return;
+        }
+
+        const payload = JSON.stringify({
+          model: pickModel(_body),
+          messages: [
+            {
+              role: 'system',
+              content: `You are a vocabulary and idiom expert. The user has a partial sentence or description where they know what they want to say but can't think of the exact word, phrase, or idiom. Help them find it.
+
+1. Complete their sentence with the most likely word/phrase/idiom they're looking for.
+2. Provide the full completed sentence.
+3. Suggest 1-3 matching phrases they might be thinking of, with meaning and example.
+
+Return JSON:
+{
+  "completedSentence": "The full sentence with the missing word filled in",
+  "phrases": [
+    {"phrase": "...", "category": "word|phrase|idiom", "meaning": "...", "example": "..."}
+  ]
+}`
+            },
+            { role: 'user', content: text }
+          ],
+          temperature: 0.7
+        });
+
+        const https = require('https');
+        const options = {
+          hostname: 'api.openai.com',
+          path: '/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        const apiReq = https.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `OpenAI API error: ${apiRes.statusCode}` }));
+              return;
+            }
+            try {
+              const json = JSON.parse(data);
+              let content = json.choices[0].message.content.trim();
+              content = content.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+              const result = JSON.parse(content);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (e) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // English → Chinese translate endpoint
+  if (req.method === 'POST' && req.url === '/api/translate-en2zh') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { text } = _body;
+        if (!text) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing text' }));
+          return;
+        }
+
+        const payload = JSON.stringify({
+          model: pickModel(_body),
+          messages: [
+            {
+              role: 'system',
+              content: `You are a translation expert. Translate the English text into natural, fluent Chinese (Simplified). Also provide the pinyin romanization and any useful notes about the translation (e.g. formality level, alternative translations, cultural context).
+
+Return JSON:
+{
+  "translation": "中文翻译",
+  "pinyin": "zhōng wén fān yì",
+  "notes": "Optional notes about formality, alternatives, or cultural context"
+}`
+            },
+            { role: 'user', content: text }
+          ],
+          temperature: 0.7
+        });
+
+        const https = require('https');
+        const options = {
+          hostname: 'api.openai.com',
+          path: '/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        const apiReq = https.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `OpenAI API error: ${apiRes.statusCode}` }));
+              return;
+            }
+            try {
+              const json = JSON.parse(data);
+              let content = json.choices[0].message.content.trim();
+              content = content.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+              const result = JSON.parse(content);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (e) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
   // Chinese → English translate + key phrases endpoint
   if (req.method === 'POST' && req.url === '/api/translate-zh') {
     let body = '';
