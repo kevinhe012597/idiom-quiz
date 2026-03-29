@@ -907,6 +907,7 @@ textarea { resize: vertical; min-height: 80px; }
 .lookup-section-icon { font-size: 1.3rem; flex-shrink: 0; }
 .lookup-section-name { font-weight: 600; font-size: 0.95rem; color: var(--text); }
 .lookup-section-desc { font-size: 0.75rem; color: var(--text-dim); margin-top: 2px; }
+.lookup-usage-badge { font-size: 0.65rem; color: var(--accent); opacity: 0.7; }
 .lookup-section-chevron {
   font-size: 1rem;
   color: var(--text-dim);
@@ -1439,6 +1440,7 @@ textarea { resize: vertical; min-height: 80px; }
         <div>
           <div class="lookup-section-name">Look up a word</div>
           <div class="lookup-section-desc">Get the definition, meaning, and examples</div>
+          <span class="lookup-usage-badge" id="usage-word"></span>
         </div>
       </div>
       <span class="lookup-section-chevron" id="chevron-word">▸</span>
@@ -1487,6 +1489,7 @@ textarea { resize: vertical; min-height: 80px; }
         <div>
           <div class="lookup-section-name">Complete my sentence</div>
           <div class="lookup-section-desc">You know the sentence but can't think of the word</div>
+          <span class="lookup-usage-badge" id="usage-complete"></span>
         </div>
       </div>
       <span class="lookup-section-chevron" id="chevron-complete">▸</span>
@@ -1509,6 +1512,7 @@ textarea { resize: vertical; min-height: 80px; }
         <div>
           <div class="lookup-section-name">Describe what you mean</div>
           <div class="lookup-section-desc">Describe a concept, get the word or phrase for it</div>
+          <span class="lookup-usage-badge" id="usage-reverse"></span>
         </div>
       </div>
       <span class="lookup-section-chevron" id="chevron-reverse">▸</span>
@@ -1530,6 +1534,7 @@ textarea { resize: vertical; min-height: 80px; }
         <div>
           <div class="lookup-section-name">Synonyms & alternatives</div>
           <div class="lookup-section-desc">Find other ways to say the same thing</div>
+          <span class="lookup-usage-badge" id="usage-synonyms"></span>
         </div>
       </div>
       <span class="lookup-section-chevron" id="chevron-synonyms">▸</span>
@@ -1550,6 +1555,7 @@ textarea { resize: vertical; min-height: 80px; }
         <div>
           <div class="lookup-section-name">Check my word choice</div>
           <div class="lookup-section-desc">Verify you're using a word correctly in context</div>
+          <span class="lookup-usage-badge" id="usage-critique"></span>
         </div>
       </div>
       <span class="lookup-section-chevron" id="chevron-critique">▸</span>
@@ -1572,6 +1578,7 @@ textarea { resize: vertical; min-height: 80px; }
         <div>
           <div class="lookup-section-name">Polish my sentence</div>
           <div class="lookup-section-desc">Refine a rough sentence into polished English</div>
+          <span class="lookup-usage-badge" id="usage-polish"></span>
         </div>
       </div>
       <span class="lookup-section-chevron" id="chevron-polish">▸</span>
@@ -1591,6 +1598,7 @@ textarea { resize: vertical; min-height: 80px; }
         <div>
           <div class="lookup-section-name">Chinese → English</div>
           <div class="lookup-section-desc">Translate Chinese and learn key phrases</div>
+          <span class="lookup-usage-badge" id="usage-zh2en"></span>
         </div>
       </div>
       <span class="lookup-section-chevron" id="chevron-zh2en">▸</span>
@@ -1612,6 +1620,7 @@ textarea { resize: vertical; min-height: 80px; }
         <div>
           <div class="lookup-section-name">English → Chinese</div>
           <div class="lookup-section-desc">Translate English to Chinese with pinyin</div>
+          <span class="lookup-usage-badge" id="usage-en2zh"></span>
         </div>
       </div>
       <span class="lookup-section-chevron" id="chevron-en2zh">▸</span>
@@ -1683,6 +1692,20 @@ textarea { resize: vertical; min-height: 80px; }
       <button class="fill-target-btn fill-target-nailed" onclick="startFillBlank('nailed')">Nailed it</button>
       <button class="fill-target-btn fill-target-skip" onclick="startFillBlank('skip')">Not Useful</button>
       <button class="fill-target-btn fill-target-cancel" onclick="closeFillBlankTargetDialog()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="fill-target-dialog" id="recent-progress-dialog" onclick="if(event.target===this)this.classList.remove('visible')">
+  <div class="fill-target-card">
+    <h3>Recent (15 days)</h3>
+    <p style="color:var(--text-dim); font-size:0.9rem; margin:8px 0;">
+      You have saved progress: <strong id="recent-progress-info"></strong>
+    </p>
+    <p style="color:var(--accent); font-size:0.85rem; margin-bottom:16px;" id="recent-progress-remaining"></p>
+    <div style="display:flex; gap:10px;">
+      <button class="btn-primary" onclick="continueRecentProgress()" style="flex:1;">Continue</button>
+      <button class="btn-secondary" onclick="startOverRecent()" style="flex:1;">Start Over</button>
     </div>
   </div>
 </div>
@@ -2420,7 +2443,77 @@ function onFillTargetBackdrop(event) {
   }
 }
 
+const RECENT_PROGRESS_KEY = 'lexicon-recent-progress';
+
+function getRecentProgress() {
+  try { return JSON.parse(localStorage.getItem(RECENT_PROGRESS_KEY)) || null; } catch { return null; }
+}
+
+function saveRecentProgress() {
+  if (fillBlankTarget !== 'recent') return;
+  const completedIds = reviewQueue.slice(0, reviewIndex).map(c => c.phrase);
+  localStorage.setItem(RECENT_PROGRESS_KEY, JSON.stringify({
+    completedIds,
+    total: reviewQueue.length + completedIds.length,
+    savedAt: new Date().toISOString()
+  }));
+}
+
+function clearRecentProgress() {
+  localStorage.removeItem(RECENT_PROGRESS_KEY);
+}
+
 function startFillBlank(bucket) {
+  // For 'recent' bucket, check for saved progress
+  if (bucket === 'recent') {
+    const progress = getRecentProgress();
+    const allRecent = getCardsByBucket('recent');
+    if (progress && progress.completedIds.length > 0) {
+      const remaining = allRecent.filter(c => !progress.completedIds.includes(c.phrase));
+      if (remaining.length > 0) {
+        // Show continue/start-over dialog
+        closeFillBlankTargetDialog();
+        const d = document.getElementById('recent-progress-dialog');
+        document.getElementById('recent-progress-info').textContent =
+          `${progress.completedIds.length} of ${allRecent.length} completed`;
+        document.getElementById('recent-progress-remaining').textContent =
+          `${remaining.length} remaining`;
+        d.classList.add('visible');
+        return;
+      } else {
+        // All done — clear and start fresh
+        clearRecentProgress();
+      }
+    }
+  }
+
+  _doStartFillBlank(bucket);
+}
+
+function continueRecentProgress() {
+  document.getElementById('recent-progress-dialog').classList.remove('visible');
+  const progress = getRecentProgress();
+  const allRecent = getCardsByBucket('recent');
+  const remaining = allRecent.filter(c => !progress.completedIds.includes(c.phrase));
+
+  reviewMode = 'fill-blank';
+  fillBlankTarget = 'recent';
+  reviewQueue = remaining.sort(() => Math.random() - 0.5);
+  reviewIndex = 0;
+  blankCache.clear();
+  for (let i = 0; i < Math.min(3, reviewQueue.length); i++) preloadBlank(reviewQueue[i]);
+  sessionStats = { reviewed: 0, goodOrBetter: 0 };
+  showScreen('review');
+  showCurrentCard();
+}
+
+function startOverRecent() {
+  document.getElementById('recent-progress-dialog').classList.remove('visible');
+  clearRecentProgress();
+  _doStartFillBlank('recent');
+}
+
+function _doStartFillBlank(bucket) {
   reviewMode = 'fill-blank';
   fillBlankTarget = bucket || null;
   reviewQueue = getCardsByBucket(fillBlankTarget).sort(() => Math.random() - 0.5);
@@ -3127,6 +3220,7 @@ function rateCard(quality) {
       recordDailyReview(card.id, false);
     }
     reviewIndex++;
+    saveRecentProgress();
     showCurrentCard();
     return;
   }
@@ -3161,10 +3255,14 @@ function rateCard(quality) {
   }
 
   reviewIndex++;
+  saveRecentProgress();
   showCurrentCard();
 }
 
 function endReview() {
+  if (fillBlankTarget === 'recent' && reviewIndex >= reviewQueue.length) {
+    clearRecentProgress(); // completed all — reset
+  }
   if (fillBlankTarget === 'daily') {
     showScreen('dashboard');
     return;
@@ -3477,6 +3575,32 @@ function showLookup() {
   });
   lookupData = null;
   showScreen('lookup');
+  updateLookupBadges();
+}
+
+// ─── Look Up Usage Tracking ─────────────────────────────────────────────
+const LOOKUP_USAGE_KEY = 'lexicon-lookup-usage';
+
+function getLookupUsage() {
+  try { return JSON.parse(localStorage.getItem(LOOKUP_USAGE_KEY)) || {}; } catch { return {}; }
+}
+
+function trackLookupUsage(key) {
+  const usage = getLookupUsage();
+  usage[key] = (usage[key] || 0) + 1;
+  localStorage.setItem(LOOKUP_USAGE_KEY, JSON.stringify(usage));
+  updateLookupBadges();
+}
+
+function updateLookupBadges() {
+  const usage = getLookupUsage();
+  ['word','complete','reverse','synonyms','critique','polish','zh2en','en2zh'].forEach(key => {
+    const badge = document.getElementById('usage-' + key);
+    if (badge) {
+      const count = usage[key] || 0;
+      badge.textContent = count > 0 ? count + (count === 1 ? ' use' : ' uses') : '';
+    }
+  });
 }
 
 function toggleLookupSection(key) {
@@ -3497,6 +3621,7 @@ async function doLookup() {
   const input = document.getElementById('lookup-input');
   const phrase = input.value.trim();
   if (!phrase) { showToast('Type a word first'); return; }
+  trackLookupUsage('word');
 
   const btn = document.getElementById('lookup-btn');
   btn.disabled = true;
@@ -3629,6 +3754,7 @@ async function doTranslate() {
   const input = document.getElementById('translate-input');
   const text = input.value.trim();
   if (!text) { showToast('输入中文先'); return; }
+  trackLookupUsage('zh2en');
 
   const btn = document.getElementById('translate-btn');
   btn.disabled = true;
@@ -3725,6 +3851,7 @@ async function doReverseLookup() {
   const input = document.getElementById('reverse-input');
   const description = input.value.trim();
   if (!description) { showToast('Describe what you mean first'); return; }
+  trackLookupUsage('reverse');
 
   const btn = document.getElementById('reverse-btn');
   btn.disabled = true;
@@ -3813,6 +3940,7 @@ async function doSynonyms() {
   const input = document.getElementById('synonym-input');
   const query = input.value.trim();
   if (!query) { showToast('Enter a word or phrase first'); return; }
+  trackLookupUsage('synonyms');
 
   const btn = document.getElementById('synonym-btn');
   btn.disabled = true;
@@ -3976,6 +4104,7 @@ async function doCritique() {
   const word = document.getElementById('critique-word').value.trim();
   if (!sentence) { showToast('Type your sentence first'); return; }
   if (!word) { showToast('Which word are you unsure about?'); return; }
+  trackLookupUsage('critique');
 
   const btn = document.getElementById('critique-btn');
   btn.disabled = true;
@@ -4053,6 +4182,7 @@ async function doPolish() {
   const input = document.getElementById('polish-input');
   const sentence = input.value.trim();
   if (!sentence) { showToast('Type a sentence first'); return; }
+  trackLookupUsage('polish');
 
   const btn = document.getElementById('polish-btn');
   btn.disabled = true;
@@ -4158,6 +4288,7 @@ async function doComplete() {
   const text = input.value.trim();
   const meaning = (document.getElementById('complete-meaning')?.value || '').trim();
   if (!text && !meaning) { showToast('Type your sentence or meaning first'); return; }
+  trackLookupUsage('complete');
 
   const btn = document.getElementById('complete-btn');
   btn.disabled = true;
@@ -4230,6 +4361,7 @@ async function doTranslateEn2Zh() {
   const input = document.getElementById('en2zh-input');
   const text = input.value.trim();
   if (!text) { showToast('Type English text first'); return; }
+  trackLookupUsage('en2zh');
 
   const btn = document.getElementById('en2zh-btn');
   btn.disabled = true;
