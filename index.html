@@ -6173,193 +6173,10 @@ function importJSON() {
   renderBrowseList();
 }
 
-// ─── Notion Import ──────────────────────────────────────────────────────
-
-async function importFromNotion() {
-  const btn = document.getElementById('import-notion-btn');
-  btn.disabled = true;
-  btn.textContent = 'Syncing with Notion...';
-
-  try {
-    // Try live sync first (fetches fresh data from Notion API)
-    let notionCards;
-    let source = 'Notion';
-
-    try {
-      const syncResponse = await fetch('/api/sync-notion', { method: 'POST' });
-      const syncData = await syncResponse.json();
-
-      if (syncResponse.ok && syncData.cards) {
-        notionCards = syncData.cards;
-        source = 'Notion (live sync)';
-      } else if (syncData.error && syncData.error.includes('NOTION_TOKEN')) {
-        // No token configured — fall back to static file
-        btn.textContent = 'Importing from cache...';
-        const fallbackResponse = await fetch('/api/notion-cards');
-        if (!fallbackResponse.ok) {
-          const fbData = await fallbackResponse.json().catch(() => ({}));
-          throw new Error(fbData.error || 'Failed to load Notion cards');
-        }
-        notionCards = await fallbackResponse.json();
-        source = 'cached file';
-      } else {
-        throw new Error(syncData.error || 'Sync failed');
-      }
-    } catch (syncErr) {
-      // If sync endpoint doesn't exist or network error, try static file
-      if (syncErr.message.includes('Failed to fetch') || syncErr.message.includes('NetworkError')) {
-        btn.textContent = 'Importing from cache...';
-        const fallbackResponse = await fetch('/api/notion-cards');
-        if (!fallbackResponse.ok) {
-          const fbData = await fallbackResponse.json().catch(() => ({}));
-          throw new Error(fbData.error || 'Failed to load Notion cards');
-        }
-        notionCards = await fallbackResponse.json();
-        source = 'cached file';
-      } else {
-        throw syncErr;
-      }
-    }
-
-    if (!Array.isArray(notionCards) || notionCards.length === 0) {
-      showToast('No cards found');
-      return;
-    }
-
-    // Build a set of existing phrases (lowercase) for dedup
-    const existingPhrases = new Set(cards.map(c => c.phrase.toLowerCase()));
-    const today = getToday();
-
-    let added = 0;
-    let skipped = 0;
-
-    for (const item of notionCards) {
-      if (!item.phrase) continue;
-
-      const key = item.phrase.toLowerCase();
-      if (existingPhrases.has(key)) {
-        skipped++;
-        continue;
-      }
-
-      existingPhrases.add(key);
-      cards.push({
-        id: generateId(),
-        phrase: item.phrase,
-        meaning: item.meaning || '',
-        example: item.example || '',
-        category: item.category || 'idiom',
-        bucket: item.bucket || undefined,
-        bucketUpdatedAt: item.bucket ? today : undefined,
-        createdAt: today,
-        source: item.source || 'Notion',
-        easeFactor: 2.5,
-        interval: 0,
-        repetitions: 0,
-        nextReview: today,
-        lastReview: null
-      });
-      added++;
-    }
-
-    saveCards(cards);
-    updateDashboard();
-
-    let msg = `Imported ${added} card${added !== 1 ? 's' : ''} from ${source}`;
-    if (skipped > 0) msg += ` (${skipped} duplicates skipped)`;
-    showToast(msg);
-
-  } catch (err) {
-    showToast('Error: ' + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Sync from Notion';
-  }
-}
-
-// ─── Apple Notes Import ─────────────────────────────────────────────────
-
-async function importFromAppleNotes() {
-  const btn = document.getElementById('import-apple-btn');
-  btn.disabled = true;
-  btn.textContent = 'Importing Apple Notes...';
-
-  try {
-    let appleCards;
-    let source = 'Apple Notes';
-
-    // Use cached file first (fast), fall back to live sync if no cache
-    const cacheResponse = await fetch('/api/apple-cards');
-    if (cacheResponse.ok) {
-      appleCards = await cacheResponse.json();
-      source = 'Apple Notes';
-    } else {
-      // No cache — do live sync (takes ~2 min)
-      btn.textContent = 'Syncing Apple Notes (~2 min)...';
-      const syncResponse = await fetch('/api/sync-apple', { method: 'POST' });
-      const syncData = await syncResponse.json();
-      if (syncResponse.ok && syncData.cards) {
-        appleCards = syncData.cards;
-        source = 'Apple Notes (live sync)';
-      } else {
-        throw new Error(syncData.error || 'Sync failed');
-      }
-    }
-
-    if (!Array.isArray(appleCards) || appleCards.length === 0) {
-      showToast('No cards found');
-      return;
-    }
-
-    const existingPhrases = new Set(cards.map(c => c.phrase.toLowerCase()));
-    const today = getToday();
-
-    let added = 0;
-    let skipped = 0;
-
-    for (const item of appleCards) {
-      if (!item.phrase) continue;
-
-      const key = item.phrase.toLowerCase();
-      if (existingPhrases.has(key)) {
-        skipped++;
-        continue;
-      }
-
-      existingPhrases.add(key);
-      cards.push({
-        id: generateId(),
-        phrase: item.phrase,
-        meaning: item.meaning || '',
-        example: item.example || '',
-        category: item.category || 'idiom',
-        bucket: item.bucket || undefined,
-        bucketUpdatedAt: item.bucket ? today : undefined,
-        createdAt: today,
-        source: item.source || 'Apple Notes',
-        easeFactor: 2.5,
-        interval: 0,
-        repetitions: 0,
-        nextReview: today,
-        lastReview: null
-      });
-      added++;
-    }
-
-    saveCards(cards);
-    updateDashboard();
-
-    let msg = `Imported ${added} card${added !== 1 ? 's' : ''} from ${source}`;
-    if (skipped > 0) msg += ` (${skipped} duplicates skipped)`;
-    showToast(msg);
-
-  } catch (err) {
-    showToast('Error: ' + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Import from Apple Notes';
-  }
-}
+// (Notion + Apple Notes import functions removed — those sync stacks were retired)
+// They were the only callers of /api/sync-notion, /api/sync-apple,
+// /api/notion-cards, /api/apple-cards. Replaced by the Concepts module's
+// article + YouTube extraction pipeline which is much more flexible.
 
 // ─── On-the-fly Example Generation ─────────────────────────────────────
 
@@ -6643,104 +6460,27 @@ document.addEventListener('keydown', (e) => {
 
 // ─── Init ───────────────────────────────────────────────────────────────
 
-// Startup bootstrap:
-// 1) Always merge cached Notion/Apple JSON cards into local deck (dedup by phrase)
-// 2) Backfill missing source field on existing cards
-async function bootstrapCardsFromCachedSources() {
-  let notionRes = [];
-  let appleRes = [];
-
-  try {
-    [notionRes, appleRes] = await Promise.all([
-      fetch('/api/notion-cards').then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch('/api/apple-cards').then(r => r.ok ? r.json() : []).catch(() => [])
-    ]);
-  } catch {}
-
-  const existingPhrases = new Set(cards.map(c => (c.phrase || '').toLowerCase()));
-  const sourceLookup = new Map(); // phrase (lowercase) -> source
+// One-time backfill for legacy cards that pre-date the createdAt /
+// bucketUpdatedAt fields. Runs on every load but only writes if needed.
+function backfillLegacyCardFields() {
   const today = getToday();
-
-  for (const c of notionRes) {
-    if (c && c.phrase) sourceLookup.set(c.phrase.toLowerCase(), c.source || 'Notion — Word List');
-  }
-  for (const c of appleRes) {
-    if (c && c.phrase && !sourceLookup.has(c.phrase.toLowerCase())) {
-      sourceLookup.set(c.phrase.toLowerCase(), c.source || 'Apple Notes');
-    }
-  }
-
-  let added = 0;
-  const addImportedCards = (items, fallbackSource) => {
-    for (const item of items) {
-      if (!item || !item.phrase) continue;
-      const phrase = item.phrase.trim();
-      if (!phrase) continue;
-
-      const key = phrase.toLowerCase();
-      if (existingPhrases.has(key)) continue;
-      existingPhrases.add(key);
-
-      cards.push({
-        id: generateId(),
-        phrase,
-        meaning: item.meaning || '',
-        example: item.example || '',
-        category: item.category || 'idiom',
-        bucket: item.bucket || undefined,
-        bucketUpdatedAt: item.bucket ? today : undefined,
-        createdAt: today,
-        source: item.source || fallbackSource,
-        easeFactor: 2.5,
-        interval: 0,
-        repetitions: 0,
-        nextReview: today,
-        lastReview: null
-      });
-      added++;
-    }
-  };
-
-  addImportedCards(notionRes, 'Notion');
-  addImportedCards(appleRes, 'Apple Notes');
-
-  // Backfill missing source values
-  const samplePhrases = new Set(SAMPLE_DATA.map(d => d.phrase.toLowerCase()));
   let updated = 0;
   for (const card of cards) {
-    if (!card.createdAt) {
-      card.createdAt = today;
-      updated++;
-    }
+    if (!card.createdAt) { card.createdAt = today; updated++; }
     if (card.bucket && !card.bucketUpdatedAt) {
       card.bucketUpdatedAt = card.lastReview || today;
       updated++;
     }
-
-    if (card.source) continue;
-    const key = (card.phrase || '').toLowerCase();
-    if (samplePhrases.has(key)) {
-      card.source = 'Sample';
-      updated++;
-    } else if (sourceLookup.has(key)) {
-      card.source = sourceLookup.get(key);
-      updated++;
-    }
   }
-
-  if (added > 0 || updated > 0) {
+  if (updated > 0) {
     saveCards(cards);
     updateDashboard();
-    if (document.getElementById('browse').classList.contains('active')) {
-      renderBrowseList();
-    }
-    console.log(`Bootstrap complete: ${added} imported, ${updated} source fields updated`);
   }
 }
 
 (async function initApp() {
   await syncCardsWithServerOnStartup();
-  await bootstrapCardsFromCachedSources();
+  backfillLegacyCardFields();
   await Promise.all([syncDailySessionFromServer(), syncDailyCompletionsFromServer()]);
   updateDashboard();
 })();

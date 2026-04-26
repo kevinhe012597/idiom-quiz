@@ -156,22 +156,12 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-const { syncFromNotion } = require('./notion-sync');
-const { syncFromAppleNotes } = require('./apple-notes-sync');
-
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const FIREWORKS_API_KEY = process.env.FIREWORKS_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'idiom-quiz.db');
-
-// Notion page IDs to sync (Word List + subpages)
-const NOTION_PAGE_IDS = (process.env.NOTION_PAGE_IDS || '6c5f0587-e35c-4c01-9b38-c42ba9f4a230').split(',').map(s => s.trim());
-
-// Apple Notes names to sync
-const APPLE_NOTES_NAMES = (process.env.APPLE_NOTES_NAMES || 'List,Words,Second List,2026 words').split(',').map(s => s.trim());
 
 // ─── Model routing ────────────────────────────────────────────────────────
 const FIREWORKS_MODELS = new Set([
@@ -562,10 +552,6 @@ if (!FIREWORKS_API_KEY) {
   console.warn('WARNING: FIREWORKS_API_KEY not set. Open-source models will be unavailable.');
 }
 
-if (!NOTION_TOKEN) {
-  console.warn('WARNING: NOTION_TOKEN not set. Live Notion sync will be unavailable. Add it to .env file.');
-}
-
 // Ensure DB directory exists
 const dbDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dbDir)) {
@@ -628,24 +614,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Notion cards import
-  if (req.method === 'GET' && req.url === '/api/notion-cards') {
-    const cardsPath = path.join(__dirname, 'notion-cards.json');
-    try {
-      const data = fs.readFileSync(cardsPath, 'utf-8');
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(data);
-    } catch {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'notion-cards.json not found. Run: node import-notion.js' }));
-    }
-    return;
-  }
-
   // Health check
   if (req.method === 'GET' && req.url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', hasApiKey: !!OPENAI_API_KEY, hasNotionToken: !!NOTION_TOKEN }));
+    res.end(JSON.stringify({ status: 'ok', hasApiKey: !!OPENAI_API_KEY }));
     return;
   }
 
@@ -1681,60 +1653,6 @@ ${existingTagsBlock(existingTags)}`;
       });
       return;
     }
-  }
-
-  // Notion live sync — fetches from Notion API, parses, backfills, saves
-  if (req.method === 'POST' && req.url === '/api/sync-notion') {
-    if (!NOTION_TOKEN) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'NOTION_TOKEN not configured. Add it to your .env file.' }));
-      return;
-    }
-
-    try {
-      console.log('Starting Notion sync...');
-      const entries = await syncFromNotion(NOTION_TOKEN, OPENAI_API_KEY, NOTION_PAGE_IDS, (msg) => {
-        console.log(`  [sync] ${msg}`);
-      });
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, count: entries.length, cards: entries }));
-    } catch (err) {
-      console.error('Notion sync error:', err.message);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return;
-  }
-
-  // Apple Notes live sync
-  if (req.method === 'POST' && req.url === '/api/sync-apple') {
-    try {
-      console.log('Starting Apple Notes sync...');
-      const entries = await syncFromAppleNotes(OPENAI_API_KEY, APPLE_NOTES_NAMES, (msg) => {
-        console.log(`  [apple-sync] ${msg}`);
-      });
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, count: entries.length, cards: entries }));
-    } catch (err) {
-      console.error('Apple Notes sync error:', err.message);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return;
-  }
-
-  // Apple Notes cached cards
-  if (req.method === 'GET' && req.url === '/api/apple-cards') {
-    const cardsPath = path.join(__dirname, 'apple-cards.json');
-    try {
-      const data = fs.readFileSync(cardsPath, 'utf-8');
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(data);
-    } catch {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'apple-cards.json not found. Sync from Apple Notes first.' }));
-    }
-    return;
   }
 
   // Generate example sentence on-the-fly
