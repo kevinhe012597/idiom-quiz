@@ -2,6 +2,145 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
+const mammoth = require('mammoth');
+
+// Helper: convert docx base64 to plain text via mammoth
+async function docxToText(base64Data) {
+  const buffer = Buffer.from(base64Data, 'base64');
+  const result = await mammoth.extractRawText({ buffer });
+  return result.value;
+}
+
+// Check if a media type is docx (not PDF)
+function isDocx(mediaType) {
+  return mediaType && mediaType !== 'application/pdf';
+}
+
+// ─── Concept-extraction skills (loaded from skills.md) ───────────────────
+// Single source of truth for ALL concept-creation prompts. Edit skills.md and
+// restart the server to roll out rule changes across every endpoint.
+const SKILLS_MD_PATH = path.join(__dirname, 'skills.md');
+let SKILLS_MD = '';
+try {
+  SKILLS_MD = fs.readFileSync(SKILLS_MD_PATH, 'utf-8');
+  console.log(`Loaded ${SKILLS_MD.length} chars of skills from skills.md`);
+} catch (err) {
+  console.error('WARNING: skills.md not found — concept prompts will be missing rules!', err.message);
+}
+
+// Extract a section of skills.md by H2 heading.
+// Matches "## Name" (anchored at line start via leading newline) and returns
+// everything up to the next H2 or end-of-file, trimmed. Case-insensitive.
+function skillSection(name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?:^|\\n)##\\s+${escaped}\\s*\\n([\\s\\S]*?)(?=\\n##\\s+|$)`, 'i');
+  const m = SKILLS_MD.match(re);
+  return m ? m[1].trim() : '';
+}
+
+// Compose a "## Header\n<content>" block for a list of skill section names.
+// Skips any sections that don't exist (returns empty for those).
+function skillsBlock(names) {
+  return names
+    .map(n => {
+      const body = skillSection(n);
+      return body ? `## ${n}\n${body}` : '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+// Build a "## Existing Tags" block to inject into prompts. The Tags rule in
+// skills.md instructs the model to ONLY pick from this list (no invention).
+// If the list is empty, returns an empty string so the prompt falls back to
+// the "suggest 1 broad topic tag" branch.
+function existingTagsBlock(existingTags) {
+  const tags = Array.isArray(existingTags) ? existingTags.filter(t => typeof t === 'string' && t.trim()) : [];
+  if (tags.length === 0) return '';
+  return `## Existing Tags (the user's current tag taxonomy — pick from these ONLY)\n${tags.map(t => `- ${t}`).join('\n')}\n\nIf none of these fit the card, return an empty array \`[]\` — do NOT invent a new tag.`;
+}
+
+// ─── Gemini YouTube analyzer ─────────────────────────────────────────────
+// Calls Gemini with a YouTube URL and returns a rich text "transcript-plus"
+// (timestamps, speaker attribution, visual context) that the existing concept
+// extraction pipeline can chew on. We use Gemini ONLY to convert video → text;
+// the actual card synthesis still goes through Claude + skills.md so the
+// extraction rules stay in one place.
+async function analyzeYoutubeWithGemini(youtubeUrl, guidance) {
+  if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY not configured on server');
+  }
+  const model = 'gemini-3-flash-preview';
+  const prompt = `Produce a detailed analysis of this YouTube video that another AI model can use to extract flashcard concepts. Format as plain text with these sections:
+
+# VIDEO METADATA
+- Title (from intro / on-screen / context)
+- Speaker(s) and their role/affiliation if identifiable
+- Approximate duration / topic
+
+# RICH TRANSCRIPT
+A timestamped transcript of what was said. Use [HH:MM:SS] markers every ~30 seconds. Attribute speakers by name when known (e.g. "Scott:") or by role ("Interviewer:", "Audience question:"). Preserve numbers, names, dates, and direct quotes verbatim — those are what the downstream model will mine.
+
+# VISUAL CONTEXT
+Briefly note anything important shown on screen that's not captured in audio: slides, charts, diagrams, demos, on-screen text, visible products, etc. Skip generic visuals.
+
+# KEY THEMES
+3-6 bullet points capturing the central thesis or argument of the talk. These help the downstream model identify the SPINE of the content before mining individual cards.
+
+${guidance ? `# USER FOCUS AREA\nThe user specifically cares about: "${guidance}". Spend extra detail on anything related to this in the transcript.\n\n` : ''}Be thorough — the downstream model will create flashcards from your output, so don't skip details that seem minor. Aim for completeness over brevity.`;
+
+  const payload = JSON.stringify({
+    contents: [{
+      parts: [
+        { file_data: { file_uri: youtubeUrl } },
+        { text: prompt }
+      ]
+    }],
+    generationConfig: { temperature: 0.3, maxOutputTokens: 32000 }
+  });
+
+  const https = require('https');
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'generativelanguage.googleapis.com',
+      path: `/v1beta/models/${model}:generateContent`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': GEMINI_API_KEY,
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode !== 200) {
+          console.error('Gemini YouTube error:', res.statusCode, data.slice(0, 500));
+          let errMsg = `Gemini API error (${res.statusCode})`;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error?.message) errMsg = parsed.error.message;
+          } catch {}
+          reject(new Error(errMsg));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(data);
+          const text = parsed.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('').trim();
+          if (!text) throw new Error('Empty Gemini response');
+          resolve(text);
+        } catch (e) {
+          console.error('Gemini parse error:', e.message);
+          reject(new Error('Failed to parse Gemini response'));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
 
 // Load .env
 const envPath = path.join(__dirname, '.env');
@@ -22,6 +161,9 @@ const { syncFromAppleNotes } = require('./apple-notes-sync');
 
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const FIREWORKS_API_KEY = process.env.FIREWORKS_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'idiom-quiz.db');
 
@@ -31,17 +173,393 @@ const NOTION_PAGE_IDS = (process.env.NOTION_PAGE_IDS || '6c5f0587-e35c-4c01-9b38
 // Apple Notes names to sync
 const APPLE_NOTES_NAMES = (process.env.APPLE_NOTES_NAMES || 'List,Words,Second List,2026 words').split(',').map(s => s.trim());
 
-const ALLOWED_MODELS = new Set([
+// ─── Model routing ────────────────────────────────────────────────────────
+const FIREWORKS_MODELS = new Set([
+  'accounts/fireworks/models/llama4-scout-instruct-basic',
+  'accounts/fireworks/models/llama4-maverick-instruct-basic',
+  'accounts/fireworks/models/deepseek-v3',
+  'accounts/fireworks/models/qwen3-30b-a3b',
+]);
+
+const ANTHROPIC_MODELS = new Set([
+  'claude-opus-4-7',
+  'claude-sonnet-4-6',
+  'claude-haiku-4-5-20251001',
+]);
+
+const OPENAI_MODELS = new Set([
   'gpt-4o-mini', 'gpt-5.4-nano', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-pro'
 ]);
+
+const ALLOWED_MODELS = new Set([...OPENAI_MODELS, ...FIREWORKS_MODELS, ...ANTHROPIC_MODELS]);
 const DEFAULT_MODEL = 'gpt-5.4-mini';
+
 function pickModel(body) {
   return (body && body.model && ALLOWED_MODELS.has(body.model)) ? body.model : DEFAULT_MODEL;
+}
+
+// For Anthropic-direct endpoints (extract-concepts, extract-concepts-more,
+// regen-concept) that bypass the OpenAI-compatible compatHttps layer because
+// they use document inputs / native Anthropic features. Returns the user's
+// selected Anthropic model if they picked one; otherwise Sonnet (fast default).
+// Power users can opt into Opus via the dropdown for max quality.
+const ANTHROPIC_DEFAULT_FAST = 'claude-sonnet-4-6';
+function pickAnthropicModel(body) {
+  const m = body && body.model;
+  if (m && ANTHROPIC_MODELS.has(m)) return m;
+  return ANTHROPIC_DEFAULT_FAST;
+}
+
+// ─── Background extraction job queue ──────────────────────────────────────
+// In-memory map of long-running extraction jobs. Lets the client kick off
+// an extraction, navigate away, and poll for completion later. Sufficient
+// for single-instance Railway deployment; can promote to SQLite if we ever
+// need persistence across restarts or multi-instance deployment.
+const extractionJobs = new Map();
+// Auto-clean jobs older than 1 hour
+setInterval(() => {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  for (const [id, job] of extractionJobs.entries()) {
+    if ((job.completedAt || job.startedAt) < cutoff) extractionJobs.delete(id);
+  }
+}, 5 * 60 * 1000);
+
+function generateJobId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+
+// Async core of /api/extract-concepts. Takes a parsed body, returns a Promise
+// resolving to { results, suggestedSource }. Used by both the synchronous
+// endpoint and the background-job endpoint.
+async function runExtractConcepts(_body) {
+  const startTs = Date.now();
+  let { text, guidance, docBase64, docType, cardCount, youtubeUrl, existingTags } = _body;
+  const usedModel = pickAnthropicModel(_body);
+  let usedGemini = false;
+
+  // YouTube URL: have Gemini analyze the video, then run the resulting
+  // rich text through the normal extraction pipeline below.
+  if (youtubeUrl && typeof youtubeUrl === 'string' && youtubeUrl.trim()) {
+    usedGemini = true;
+    const geminiText = await analyzeYoutubeWithGemini(youtubeUrl.trim(), guidance);
+    text = geminiText;
+    docBase64 = null;
+    docType = null;
+  }
+
+  if (!docBase64 && (!text || text.trim().length < 20)) {
+    throw new Error('Text too short — paste an article, upload a file, or add a YouTube URL');
+  }
+
+  const trimmed = text ? (text.length > 24000 ? text.slice(0, 24000) + '\n[truncated]' : text) : '';
+
+  const guidanceBlock = guidance
+    ? `\n\n## USER'S FOCUS AREA\nThe user specifically cares about: "${guidance}"\nThis MUST shape your extraction:\n- At least half of the extracted items should directly relate to this focus area\n- Go deeper on these topics — extract more granular facts, specific numbers, named entities\n- Still include a few other notable items from the text, but the user's focus area takes clear priority`
+    : '';
+
+  const cardCountClause = cardCount
+    ? `\n\nExtract EXACTLY ${cardCount} cards. Override the default count guidance.`
+    : '';
+
+  const systemPrompt = `You extract memorable knowledge from articles, transcripts, and notes for a flashcard study app.${guidanceBlock}
+
+Read the text and identify the most interesting and worth-remembering items: key concepts, companies, people, specific facts/figures/trends, and non-obvious strategic insights.
+
+You return a JSON OBJECT with two top-level fields:
+1. "suggestedSource": A short descriptive label for what this source IS (see Source Inference below).
+2. "results": An array of card objects matching the Card Structure below.
+
+${skillsBlock([
+  'Card Structure', 'Bullet Format', 'TL;DR First Bullet', 'Self-Explanatory Titles',
+  'Tags', 'Beyond-the-Basics Depth', 'Entity-Specific Required Coverage',
+  'Source Inference', 'Card Density', 'Speaker Attribution', 'Output',
+])}
+
+${existingTagsBlock(existingTags)}${cardCountClause}`;
+
+  const docInstruction = guidance
+    ? `Extract key concepts from this document. Focus especially on: ${guidance}`
+    : 'Extract key concepts from this document.';
+  let userContent;
+  if (docBase64) {
+    if (isDocx(docType)) {
+      const docText = await docxToText(docBase64);
+      userContent = `Document content:\n${docText}\n\n${docInstruction}`;
+    } else {
+      userContent = [
+        { type: 'document', source: { type: 'base64', media_type: docType || 'application/pdf', data: docBase64 } },
+        { type: 'text', text: docInstruction }
+      ];
+    }
+  } else {
+    userContent = trimmed;
+  }
+
+  const extractTool = {
+    name: 'save_extracted_concepts',
+    description: 'Save the concept cards extracted from the article/transcript.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        suggestedSource: { type: 'string' },
+        results: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              points: { type: 'array', items: { type: 'string' } },
+              tags: { type: 'array', items: { type: 'string' } }
+            },
+            required: ['title', 'points', 'tags']
+          }
+        }
+      },
+      required: ['suggestedSource', 'results']
+    }
+  };
+
+  const payload = JSON.stringify({
+    model: usedModel,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userContent }],
+    max_tokens: 8000,
+    tools: [extractTool],
+    tool_choice: { type: 'tool', name: 'save_extracted_concepts' }
+  });
+
+  const https = require('https');
+  return new Promise((resolve, reject) => {
+    const apiReq = https.request({
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (apiRes) => {
+      let data = '';
+      apiRes.on('data', chunk => { data += chunk; });
+      apiRes.on('end', () => {
+        if (apiRes.statusCode !== 200) {
+          console.error('Claude extract error:', apiRes.statusCode, data.slice(0, 500));
+          reject(new Error(`Claude API error (${apiRes.statusCode})`));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(data);
+          const toolUse = (parsed.content || []).find(b => b.type === 'tool_use');
+          let out;
+          if (toolUse && toolUse.input) {
+            out = toolUse.input;
+          } else {
+            const textBlock = (parsed.content || []).find(b => b.type === 'text');
+            const content = (textBlock?.text || '').trim();
+            const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+            out = JSON.parse(jsonStr);
+          }
+          let results, suggestedSource;
+          if (Array.isArray(out)) {
+            results = out;
+            suggestedSource = '';
+          } else if (out && Array.isArray(out.results)) {
+            results = out.results;
+            suggestedSource = typeof out.suggestedSource === 'string' ? out.suggestedSource : '';
+          } else {
+            results = [out];
+            suggestedSource = '';
+          }
+          resolve({
+            results,
+            suggestedSource,
+            model: usedModel,
+            usedGemini,
+            elapsedMs: Date.now() - startTs,
+          });
+        } catch (e) {
+          reject(new Error('Failed to parse extracted concepts: ' + e.message));
+        }
+      });
+    });
+    apiReq.on('error', reject);
+    apiReq.write(payload);
+    apiReq.end();
+  });
+}
+
+// Returns { hostname, path, apiKey, provider } for a given model
+function getProvider(model) {
+  if (ANTHROPIC_MODELS.has(model)) {
+    return {
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      apiKey: ANTHROPIC_API_KEY,
+      provider: 'anthropic'
+    };
+  }
+  if (FIREWORKS_MODELS.has(model)) {
+    return {
+      hostname: 'api.fireworks.ai',
+      path: '/inference/v1/chat/completions',
+      apiKey: FIREWORKS_API_KEY,
+      provider: 'fireworks'
+    };
+  }
+  return {
+    hostname: 'api.openai.com',
+    path: '/v1/chat/completions',
+    apiKey: OPENAI_API_KEY,
+    provider: 'openai'
+  };
+}
+
+// Translate an OpenAI-format chat completion payload string into Anthropic Messages API format
+// Note: temperature is intentionally dropped — Claude Opus 4.7 deprecated it, and other Claude
+// models accept defaults that work well across our use cases.
+function translateToAnthropic(payloadStr) {
+  const oai = JSON.parse(payloadStr);
+  const systemMsgs = (oai.messages || []).filter(m => m.role === 'system');
+  const otherMsgs = (oai.messages || []).filter(m => m.role !== 'system');
+  const anthropic = {
+    model: oai.model,
+    max_tokens: oai.max_completion_tokens || oai.max_tokens || 4000,
+    ...(systemMsgs.length && { system: systemMsgs.map(m => m.content).join('\n\n') }),
+    messages: otherMsgs.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
+  };
+  return JSON.stringify(anthropic);
+}
+
+// Translate an Anthropic Messages API response back into OpenAI chat completion format
+function translateFromAnthropic(rawDataStr) {
+  try {
+    const ar = JSON.parse(rawDataStr);
+    if (ar.error) return rawDataStr; // pass through errors
+    const text = (ar.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+    return JSON.stringify({
+      id: ar.id,
+      choices: [{ message: { role: 'assistant', content: text }, finish_reason: ar.stop_reason || 'stop', index: 0 }],
+      usage: ar.usage,
+      model: ar.model,
+    });
+  } catch {
+    return rawDataStr;
+  }
+}
+
+// Build https.request options + body from a payload string (auto-detects provider from model)
+function buildRequestOptions(payload) {
+  let model = DEFAULT_MODEL;
+  try { model = JSON.parse(payload).model || DEFAULT_MODEL; } catch {}
+  const prov = getProvider(model);
+  let body = payload;
+  let headers;
+  if (prov.provider === 'anthropic') {
+    body = translateToAnthropic(payload);
+    headers = {
+      'Content-Type': 'application/json',
+      'x-api-key': prov.apiKey,
+      'anthropic-version': '2023-06-01',
+      'Content-Length': Buffer.byteLength(body),
+    };
+  } else {
+    headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${prov.apiKey}`,
+      'Content-Length': Buffer.byteLength(body),
+    };
+  }
+  const options = {
+    hostname: prov.hostname,
+    path: prov.path,
+    method: 'POST',
+    headers,
+  };
+  // Attach helpers for callers to use the translated body and translate the response
+  options._body = body;
+  options._isAnthropic = prov.provider === 'anthropic';
+  return options;
+}
+
+// Transparent wrapper around https.request. Translates Anthropic responses
+// to OpenAI chat-completion format on the fly, AND automatically swaps the
+// outbound body to Anthropic format when writing. Drop-in replacement for
+// https.request — call sites do not need to know which provider they hit.
+const compatHttps = {
+  request(options, callback) {
+    const https = require('https');
+    const isAnthropic = options.hostname === 'api.anthropic.com';
+    const translatedBody = options._body; // attached by buildRequestOptions
+    const realReq = https.request(options, (apiRes) => {
+      if (!isAnthropic) { callback(apiRes); return; }
+      let buf = '';
+      apiRes.on('data', chunk => { buf += chunk; });
+      apiRes.on('end', () => {
+        const { EventEmitter } = require('events');
+        const synth = new EventEmitter();
+        synth.statusCode = apiRes.statusCode;
+        synth.headers = apiRes.headers;
+        callback(synth);
+        const out = apiRes.statusCode === 200 ? translateFromAnthropic(buf) : buf;
+        synth.emit('data', out);
+        synth.emit('end');
+      });
+    });
+    if (isAnthropic && translatedBody) {
+      // Patch write() so callers passing the original OpenAI-format payload
+      // automatically send the translated Anthropic-format body.
+      const origWrite = realReq.write.bind(realReq);
+      realReq.write = function(_chunk) {
+        return origWrite(translatedBody);
+      };
+    }
+    return realReq;
+  }
+};
+
+// Generic chat completion helper — works with OpenAI, Fireworks, and Anthropic
+function chatCompletion(model, messages, opts = {}) {
+  const payload = JSON.stringify({
+    model,
+    messages,
+    ...(opts.temperature !== undefined && { temperature: opts.temperature }),
+    ...(opts.max_tokens && { max_completion_tokens: opts.max_tokens }),
+    ...(opts.response_format && { response_format: opts.response_format }),
+  });
+
+  return new Promise((resolve, reject) => {
+    const options = buildRequestOptions(payload);
+    const apiReq = compatHttps.request(options, (apiRes) => {
+      let data = '';
+      apiRes.on('data', chunk => { data += chunk; });
+      apiRes.on('end', () => {
+        if (apiRes.statusCode !== 200) {
+          reject(new Error(`${options.hostname} API error: ${apiRes.statusCode} — ${data}`));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(data);
+          resolve(parsed);
+        } catch (e) {
+          reject(new Error('Failed to parse API response'));
+        }
+      });
+    });
+    apiReq.on('error', reject);
+    apiReq.write(payload);
+    apiReq.end();
+  });
 }
 
 if (!OPENAI_API_KEY) {
   console.error('ERROR: OPENAI_API_KEY not set. Add it to .env file.');
   process.exit(1);
+}
+
+if (!FIREWORKS_API_KEY) {
+  console.warn('WARNING: FIREWORKS_API_KEY not set. Open-source models will be unavailable.');
 }
 
 if (!NOTION_TOKEN) {
@@ -128,6 +646,938 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', hasApiKey: !!OPENAI_API_KEY, hasNotionToken: !!NOTION_TOKEN }));
+    return;
+  }
+
+  // ─── Concepts storage (SQLite) ─────────────────────────────────────────
+  if (req.method === 'GET' && req.url === '/api/concepts') {
+    try {
+      const row = selectAppStateStmt.get('concepts');
+      const concepts = row && row.value ? JSON.parse(row.value) : [];
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ concepts: Array.isArray(concepts) ? concepts : [] }));
+    } catch (err) {
+      console.error('Load concepts error:', err.message);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (req.method === 'PUT' && req.url === '/api/concepts') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const parsed = JSON.parse(body || '{}');
+        if (!Array.isArray(parsed.concepts)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing required field: concepts (array)' }));
+          return;
+        }
+        const concepts = parsed.concepts
+          .filter(c => c && typeof c === 'object' && typeof c.title === 'string' && c.title.trim().length > 0)
+          .map(c => ({ ...c, title: c.title.trim() }));
+        upsertAppStateStmt.run('concepts', JSON.stringify(concepts), new Date().toISOString());
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, count: concepts.length }));
+      } catch (err) {
+        console.error('Save concepts error:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // ─── Scratchpad (single string) ──────────────────────────────────────────
+  if (req.method === 'GET' && req.url === '/api/scratchpad') {
+    try {
+      const row = selectAppStateStmt.get('scratchpad');
+      const text = row && row.value ? row.value : '';
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ text }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (req.method === 'PUT' && req.url === '/api/scratchpad') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > 5 * 1024 * 1024) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const parsed = JSON.parse(body || '{}');
+        const text = typeof parsed.text === 'string' ? parsed.text : '';
+        upsertAppStateStmt.run('scratchpad', text, new Date().toISOString());
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // ─── Lookup usage counters (object of key→count) ─────────────────────────
+  if (req.method === 'GET' && req.url === '/api/lookup-usage') {
+    try {
+      const row = selectAppStateStmt.get('lookup_usage');
+      const usage = row && row.value ? JSON.parse(row.value) : {};
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ usage: typeof usage === 'object' && usage !== null ? usage : {} }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (req.method === 'PUT' && req.url === '/api/lookup-usage') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const parsed = JSON.parse(body || '{}');
+        const usage = parsed.usage && typeof parsed.usage === 'object' ? parsed.usage : {};
+        upsertAppStateStmt.run('lookup_usage', JSON.stringify(usage), new Date().toISOString());
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Concept lookup (AI-powered)
+  if (req.method === 'POST' && req.url === '/api/concept-lookup') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { query, appendMode, existingBullets, existingTags } = _body;
+        if (!query) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing query' }));
+          return;
+        }
+
+        // Concept lookup uses OpenAI's Responses API + web_search_preview, which
+        // is OpenAI-only. Force an OpenAI model regardless of the user's selection.
+        const lookupModel = OPENAI_MODELS.has(pickModel(_body)) ? pickModel(_body) : DEFAULT_MODEL;
+
+        // APPEND MODE: user wants to ADD bullets without dropping existing ones.
+        // We tell the model: here's what's already saved; generate ONLY new bullets
+        // that don't duplicate, no TL;DR, no bullet count cap.
+        const existingList = (Array.isArray(existingBullets) && existingBullets.length > 0)
+          ? existingBullets.map((b, i) => `${i + 1}. ${b}`).join('\n')
+          : '';
+
+        const instructions = appendMode
+          ? `You are adding NEW bullets to an existing flashcard concept. The user already has the bullets listed below — generate ADDITIONAL bullets that complement them WITHOUT duplicating any fact, angle, or framing already covered.
+
+Return JSON: { title (echo the existing concept), points (NEW bullets only), tags (1-3 if relevant) }
+
+Existing bullets (DO NOT REPEAT THESE):
+${existingList || '(none provided)'}
+
+Use web search aggressively for fresh, specific details. Cite numbers, names, dates. Don't guess.
+
+${skillsBlock([
+  'Card Structure',
+  'Bullet Format',
+  'Self-Explanatory Titles',
+  'Tags',
+  'Beyond-the-Basics Depth',
+  'Entity-Specific Required Coverage',
+  'Append Mode',
+  'Output',
+])}
+
+${existingTagsBlock(existingTags)}`
+          : `You are a knowledgeable research assistant. Given a concept name, topic, company, technology, or description, return a structured explanation optimized for memorization and recall.
+
+Return JSON matching the Card Structure: { title, points, tags }.
+
+Use web search aggressively for the latest specifics, opinions, and color. Don't guess; search.
+
+${skillsBlock([
+  'Card Structure',
+  'Bullet Format',
+  'TL;DR First Bullet',
+  'Self-Explanatory Titles',
+  'Tags',
+  'Beyond-the-Basics Depth',
+  'Entity-Specific Required Coverage',
+  'Output',
+])}
+
+${existingTagsBlock(existingTags)}`;
+
+        const payload = JSON.stringify({
+          model: lookupModel,
+          instructions,
+          input: query,
+          tools: [{ type: 'web_search_preview' }],
+          temperature: 0.5
+        });
+
+        const https = require('https');
+        const options = {
+          hostname: 'api.openai.com',
+          path: '/v1/responses',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        const apiReq = compatHttps.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'OpenAI API error' }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              // Responses API: extract text from output array
+              let content = '';
+              for (const item of parsed.output) {
+                if (item.type === 'message' && item.content) {
+                  for (const block of item.content) {
+                    if (block.type === 'output_text') content += block.text;
+                  }
+                }
+              }
+              content = content.trim();
+              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+              const result = JSON.parse(jsonStr);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Follow-up chat
+  if (req.method === 'POST' && req.url === '/api/followup-chat') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { context, history, mode } = _body;
+        if (!context || !history || history.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing context or question' }));
+          return;
+        }
+
+        // Web search is ALWAYS available — Claude decides when to use it.
+        // Encourage it for time-sensitive or factual questions but don't force it.
+        const webSearchClause = '\n\nYou have access to a web_search tool. USE IT WHENEVER the question touches on anything that could have changed since training: current events, today\'s status, latest news, recent prices/valuations/funding, statistics, quotes, public sentiment. For purely conceptual or definitional questions, answer directly without searching. When you do search, cite the sources inline.';
+
+        const styleClause = '\n\nFormatting: write naturally as a knowledgeable friend would — no bullet lists or headers unless the answer truly demands them. Markdown is supported (**bold**, *italic*, `code`, [links](url)). Keep answers tight (3-6 sentences) unless more depth is genuinely needed.';
+
+        const systemPrompt = mode === 'concept'
+          ? `You are a knowledgeable tutor helping a student learn about a concept. Use specific facts, numbers, and names when relevant.${webSearchClause}${styleClause}\n\nContext:\n${context}`
+          : `You are a vocabulary tutor helping a student master English words and phrases. Give examples, explain nuances, and clarify usage.${webSearchClause}${styleClause}\n\nContext:\n${context}`;
+
+        const claudeMessages = history.map(h => ({ role: h.role, content: h.content }));
+
+        const payloadObj = {
+          model: 'claude-opus-4-20250514',
+          system: systemPrompt,
+          messages: claudeMessages,
+          max_tokens: 1500,  // generous budget so search results + answer fit
+          tools: [{ type: 'web_search_20250305', name: 'web_search' }]
+        };
+        const payload = JSON.stringify(payloadObj);
+
+        const https = require('https');
+        const options = {
+          hostname: 'api.anthropic.com',
+          path: '/v1/messages',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        // Use raw https.request — this endpoint speaks Anthropic format natively
+        // and parses Claude's content blocks directly. With web search, the response
+        // can contain multiple blocks (text + server_tool_use + web_search_tool_result + text).
+        // We take the LAST text block as the final answer.
+        const apiReq = https.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('followup-chat Claude error:', apiRes.statusCode, data);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              try {
+                const errParsed = JSON.parse(data);
+                res.end(JSON.stringify({ error: errParsed.error?.message || 'Claude API error' }));
+              } catch {
+                res.end(JSON.stringify({ error: `Claude API error (${apiRes.statusCode})` }));
+              }
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              // Find the last text block — with web search, there may be multiple
+              let textContent = '';
+              for (const block of (parsed.content || [])) {
+                if (block.type === 'text' && block.text) textContent = block.text;
+              }
+              const answer = textContent.trim();
+              if (!answer) throw new Error('Empty response');
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ answer }));
+            } catch (e) {
+              console.error('followup-chat parse error:', e.message, data.slice(0, 500));
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Concept batch enrich
+  if (req.method === 'POST' && req.url === '/api/concept-enrich') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { concepts: conceptList, existingTags } = _body;
+        if (!Array.isArray(conceptList) || conceptList.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing concepts array' }));
+          return;
+        }
+
+        const numbered = conceptList.map((c, i) => `${i + 1}. ${c}`).join('\n');
+        const payload = JSON.stringify({
+          model: pickModel(_body),
+          messages: [
+            {
+              role: 'system',
+              content: `You enrich knowledge concepts for a flashcard app. For each concept given, return one card object matching the Card Structure below.
+
+Return a JSON ARRAY in the same order as the input.
+
+${skillsBlock([
+  'Card Structure',
+  'Bullet Format',
+  'TL;DR First Bullet',
+  'Self-Explanatory Titles',
+  'Tags',
+  'Beyond-the-Basics Depth',
+  'Entity-Specific Required Coverage',
+  'Output',
+])}
+
+${existingTagsBlock(existingTags)}`
+            },
+            {
+              role: 'user',
+              content: numbered
+            }
+          ],
+          temperature: 0.3
+        });
+
+        const https = require('https');
+        const options = buildRequestOptions(payload);
+
+        const apiReq = compatHttps.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'OpenAI API error' }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices[0].message.content.trim();
+              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+              const results = JSON.parse(jsonStr);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ results: Array.isArray(results) ? results : [results] }));
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Extract concepts from article/transcript text — synchronous (waits for completion)
+  if (req.method === 'POST' && req.url === '/api/extract-concepts') {
+    let body = '';
+    let tooLarge = false;
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 30 * 1024 * 1024) { tooLarge = true; req.destroy(); }
+    });
+    req.on('end', async () => {
+      if (tooLarge) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'File too large — max 30MB' }));
+        return;
+      }
+      try {
+        const _body = JSON.parse(body);
+        const result = await runExtractConcepts(_body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Start an extraction in the background — returns jobId immediately so the
+  // client can navigate away and poll for completion later.
+  if (req.method === 'POST' && req.url === '/api/extract-concepts/start') {
+    let body = '';
+    let tooLarge = false;
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 30 * 1024 * 1024) { tooLarge = true; req.destroy(); }
+    });
+    req.on('end', () => {
+      if (tooLarge) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'File too large — max 30MB' }));
+        return;
+      }
+      let _body;
+      try { _body = JSON.parse(body); }
+      catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Bad JSON' })); return; }
+
+      // Create the job up front so the client can poll immediately
+      const jobId = generateJobId();
+      const sourceHint = _body.youtubeUrl
+        ? `YouTube: ${_body.youtubeUrl}`
+        : (_body.docBase64 ? 'Uploaded document' : (typeof _body.text === 'string' ? _body.text.slice(0, 60).trim() + (_body.text.length > 60 ? '…' : '') : 'Article'));
+      extractionJobs.set(jobId, {
+        status: 'running',
+        startedAt: Date.now(),
+        meta: { sourceHint, kind: _body.youtubeUrl ? 'youtube' : 'article' },
+      });
+
+      // Respond immediately with the jobId
+      res.writeHead(202, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ jobId, status: 'running' }));
+
+      // Fire the actual extraction async — store result/error against the jobId
+      runExtractConcepts(_body)
+        .then(result => {
+          const job = extractionJobs.get(jobId);
+          if (!job) return; // job was cleaned up
+          job.status = 'done';
+          job.result = result;
+          job.completedAt = Date.now();
+        })
+        .catch(err => {
+          const job = extractionJobs.get(jobId);
+          if (!job) return;
+          job.status = 'error';
+          job.error = err.message;
+          job.completedAt = Date.now();
+          console.error(`Extraction job ${jobId} failed:`, err.message);
+        });
+    });
+    return;
+  }
+
+  // Poll the status of a background extraction job
+  if (req.method === 'GET' && req.url.startsWith('/api/extract-concepts/status/')) {
+    const jobId = req.url.split('/').pop();
+    const job = extractionJobs.get(jobId);
+    if (!job) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Job not found (may have expired)' }));
+      return;
+    }
+    const payload = {
+      status: job.status,
+      elapsedMs: (job.completedAt || Date.now()) - job.startedAt,
+      meta: job.meta,
+    };
+    if (job.status === 'done') payload.result = job.result;
+    if (job.status === 'error') payload.error = job.error;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(payload));
+    return;
+  }
+
+  // List in-flight jobs (for the dashboard widget)
+  if (req.method === 'GET' && req.url === '/api/extract-concepts/jobs') {
+    const jobs = [];
+    for (const [id, job] of extractionJobs.entries()) {
+      jobs.push({
+        jobId: id,
+        status: job.status,
+        startedAt: job.startedAt,
+        completedAt: job.completedAt,
+        meta: job.meta,
+      });
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ jobs }));
+    return;
+  }
+
+  // Merge multiple concept cards into one — used when the user selects 2+
+  // overlapping cards in Browse and wants to consolidate them.
+  if (req.method === 'POST' && req.url === '/api/merge-concepts') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > 5 * 1024 * 1024) req.destroy(); });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { cards, existingTags } = _body;
+        if (!Array.isArray(cards) || cards.length < 2) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Need at least 2 cards to merge' }));
+          return;
+        }
+
+        // Compose the input for the AI: each card's title + bullets + notes
+        const cardsText = cards.map((c, i) => {
+          const lines = [`### Card ${i + 1}: ${c.title || '(untitled)'}`];
+          if (c.tags && c.tags.length) lines.push(`Tags: ${c.tags.join(', ')}`);
+          if (c.points && c.points.length) {
+            lines.push('Bullets:');
+            c.points.forEach(p => lines.push(`- ${p}`));
+          } else if (c.summary) {
+            lines.push(`Summary: ${c.summary}`);
+          }
+          if (c.notes) lines.push(`User notes: ${c.notes}`);
+          return lines.join('\n');
+        }).join('\n\n');
+
+        const systemPrompt = `You are merging multiple concept flashcards that the user believes are about the same topic. Produce ONE consolidated card that:
+- Has a single self-explanatory title (pick the best of the inputs, or improve)
+- Combines bullets WITHOUT duplicates — when two bullets overlap, keep the more informative version
+- Preserves specific facts (numbers, names, dates) from ALL inputs
+- Keeps the FIRST bullet as a "TL;DR: " cocktail-party takeaway
+- Stays within 5-7 total bullets — synthesize ruthlessly, don't just concatenate
+- Combines tags (deduplicated) — pick from existing taxonomy, don't invent new
+
+${skillsBlock([
+  'Card Structure',
+  'Bullet Format',
+  'TL;DR First Bullet',
+  'Self-Explanatory Titles',
+  'Tags',
+  'Beyond-the-Basics Depth',
+  'Output',
+])}
+
+${existingTagsBlock(existingTags)}`;
+
+        const userContent = `Merge these ${cards.length} cards into one:\n\n${cardsText}`;
+
+        const mergeTool = {
+          name: 'save_merged_card',
+          description: 'Save the merged concept card.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              points: { type: 'array', items: { type: 'string' } },
+              tags: { type: 'array', items: { type: 'string' } }
+            },
+            required: ['title', 'points', 'tags']
+          }
+        };
+
+        const payload = JSON.stringify({
+          model: pickAnthropicModel(_body),
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContent }],
+          max_tokens: 4000,
+          tools: [mergeTool],
+          tool_choice: { type: 'tool', name: 'save_merged_card' }
+        });
+
+        const https = require('https');
+        const apiReq = https.request({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Length': Buffer.byteLength(payload) }
+        }, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('merge-concepts error:', apiRes.statusCode, data.slice(0, 500));
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Claude API error' }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const toolUse = (parsed.content || []).find(b => b.type === 'tool_use' && b.name === 'save_merged_card');
+              if (toolUse && toolUse.input) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ merged: toolUse.input }));
+                return;
+              }
+              throw new Error('No tool_use in response');
+            } catch (e) {
+              console.error('merge-concepts parse error:', e.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse merge response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: err.message })); });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Regenerate a single concept card
+  if (req.method === 'POST' && req.url === '/api/regen-concept') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > 30 * 1024 * 1024) req.destroy(); });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { title, currentPoints, instruction, context, useWebSearch, existingTags } = _body;
+        if (!title || !instruction) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing title or instruction' }));
+          return;
+        }
+
+        const webSearchClause = useWebSearch
+          ? '\n\nUse web search aggressively for the latest specific facts, numbers, quotes, and color. Do not guess.'
+          : '';
+
+        const systemPrompt = `You are regenerating a flashcard about "${title}" for a study app.
+
+Current bullet points:
+${(currentPoints || []).map(p => '• ' + p).join('\n')}
+
+The user wants you to regenerate this card with a different angle: "${instruction}"${webSearchClause}
+
+Return a single JSON OBJECT matching the Card Structure below (fields: title, points, tags). The title should stay the same or improve.
+
+${skillsBlock([
+  'Card Structure',
+  'Bullet Format',
+  'TL;DR First Bullet',
+  'Self-Explanatory Titles',
+  'Tags',
+  'Beyond-the-Basics Depth',
+  'Entity-Specific Required Coverage',
+  'Output',
+])}
+
+${existingTagsBlock(existingTags)}
+
+CRITICAL: Your FINAL message must contain ONLY a valid JSON object. No prose, no explanation, no markdown fences. If you searched the web first, put ALL findings into the JSON points.`;
+
+        const https = require('https');
+
+        // Build user content (shared for both modes)
+        let userContent;
+        if (context?.docBase64) {
+          if (isDocx(context.docType)) {
+            const docText = await docxToText(context.docBase64);
+            userContent = `Source document:\n${docText.slice(0, 8000)}\n\nRegenerate the card about "${title}" with this angle: ${instruction}`;
+          } else {
+            userContent = [
+              { type: 'document', source: { type: 'base64', media_type: context.docType || 'application/pdf', data: context.docBase64 } },
+              { type: 'text', text: `Regenerate the card about "${title}" with this angle: ${instruction}` }
+            ];
+          }
+        } else if (context?.text) {
+          userContent = `Source article (for reference):\n${context.text.slice(0, 8000)}\n\nRegenerate the card about "${title}" with this angle: ${instruction}`;
+        } else {
+          userContent = `Regenerate the card about "${title}" with this angle: ${instruction}`;
+        }
+
+        // Force structured output via tool_use
+        const regenTool = {
+          name: 'save_regenerated_card',
+          description: 'Save the regenerated concept card.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              points: { type: 'array', items: { type: 'string' } },
+              tags: { type: 'array', items: { type: 'string' } }
+            },
+            required: ['title', 'points', 'tags']
+          }
+        };
+        const tools = [regenTool];
+        if (useWebSearch) tools.push({ type: 'web_search_20250305', name: 'web_search' });
+        const payloadObj = {
+          model: pickAnthropicModel(_body),
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContent }],
+          max_tokens: 8000,
+          tools,
+          // With web search, let the model decide when to call which tool
+          // (it'll search first, then save). Without, force the save tool.
+          tool_choice: useWebSearch ? { type: 'auto' } : { type: 'tool', name: 'save_regenerated_card' }
+        };
+        const payload = JSON.stringify(payloadObj);
+
+        const apiReq = https.request({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Length': Buffer.byteLength(payload) }
+        }, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('regen-concept error:', apiRes.statusCode, data);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Claude API error' }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              // Look for the structured tool_use response first (preferred path)
+              const toolUse = (parsed.content || []).find(b => b.type === 'tool_use' && b.name === 'save_regenerated_card');
+              if (toolUse && toolUse.input) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(toolUse.input));
+                return;
+              }
+              // Fallback: parse from text block (in case the model returned text)
+              let textContent = '';
+              for (const block of parsed.content) {
+                if (block.type === 'text') textContent = block.text;
+              }
+              let content = textContent.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '');
+              if (!content.startsWith('{')) {
+                const jsonMatch = content.match(/\{[\s\S]*\}/);
+                if (jsonMatch) content = jsonMatch[0];
+              }
+              const result = JSON.parse(content);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (e) {
+              console.error('regen-concept parse error:', e.message, data.slice(0, 500));
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: err.message })); });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Extract additional concepts from the same article
+  if (req.method === 'POST' && req.url === '/api/extract-concepts-more') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > 30 * 1024 * 1024) req.destroy(); });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { instruction, existingTitles, context, existingTags } = _body;
+        if (!instruction) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing instruction' }));
+          return;
+        }
+
+        const existingList = (existingTitles || []).map(t => `- ${t}`).join('\n');
+        const systemPrompt = `You extract ADDITIONAL concept cards from a document for a flashcard study app.
+
+The user already has these cards (DO NOT DUPLICATE):
+${existingList}
+
+The user wants MORE cards focused on: "${instruction}"
+
+Return a JSON ARRAY of new card objects matching the Card Structure below.
+
+${skillsBlock([
+  'Card Structure',
+  'Bullet Format',
+  'TL;DR First Bullet',
+  'Self-Explanatory Titles',
+  'Tags',
+  'Beyond-the-Basics Depth',
+  'Entity-Specific Required Coverage',
+  'Output',
+])}
+
+${existingTagsBlock(existingTags)}`;
+
+        let userContent;
+        if (context?.docBase64) {
+          if (isDocx(context.docType)) {
+            const docText = await docxToText(context.docBase64);
+            userContent = `Source document:\n${docText.slice(0, 8000)}\n\nExtract additional concepts: ${instruction}`;
+          } else {
+            userContent = [
+              { type: 'document', source: { type: 'base64', media_type: context.docType || 'application/pdf', data: context.docBase64 } },
+              { type: 'text', text: `Extract additional concepts: ${instruction}` }
+            ];
+          }
+        } else if (context?.text) {
+          userContent = `Source article:\n${context.text.slice(0, 8000)}\n\nExtract additional concepts: ${instruction}`;
+        } else {
+          userContent = `Extract additional concepts: ${instruction}`;
+        }
+
+        // Force structured output via tool_use
+        const moreTool = {
+          name: 'save_additional_concepts',
+          description: 'Save the additional concept cards.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              results: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    title: { type: 'string' },
+                    points: { type: 'array', items: { type: 'string' } },
+                    tags: { type: 'array', items: { type: 'string' } }
+                  },
+                  required: ['title', 'points', 'tags']
+                }
+              }
+            },
+            required: ['results']
+          }
+        };
+
+        const payload = JSON.stringify({
+          model: pickAnthropicModel(_body),
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContent }],
+          max_tokens: 8000,
+          tools: [moreTool],
+          tool_choice: { type: 'tool', name: 'save_additional_concepts' }
+        });
+
+        const https = require('https');
+        const apiReq = https.request({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Length': Buffer.byteLength(payload) }
+        }, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('extract-more error:', apiRes.statusCode, data);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Claude API error' }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              // Prefer tool_use response shape
+              const toolUse = (parsed.content || []).find(b => b.type === 'tool_use' && b.name === 'save_additional_concepts');
+              let results;
+              if (toolUse && toolUse.input && Array.isArray(toolUse.input.results)) {
+                results = toolUse.input.results;
+              } else {
+                // Fallback to text parsing
+                const textBlock = (parsed.content || []).find(b => b.type === 'text');
+                const content = (textBlock?.text || '').trim().replace(/^```json\s*/, '').replace(/\s*```$/, '');
+                const out = JSON.parse(content);
+                results = Array.isArray(out) ? out : (Array.isArray(out.results) ? out.results : [out]);
+              }
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ results }));
+            } catch (e) {
+              console.error('extract-more parse error:', e.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: err.message })); });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
     return;
   }
 
@@ -438,17 +1888,8 @@ Please redefine this card according to the user's feedback.`
 
         const https = require('https');
         const result = await new Promise((resolve, reject) => {
-          const options = {
-            hostname: 'api.openai.com',
-            path: '/v1/chat/completions',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${OPENAI_API_KEY}`,
-              'Content-Length': Buffer.byteLength(payload),
-            },
-          };
-          const apiReq = https.request(options, (apiRes) => {
+          const options = buildRequestOptions(payload);
+          const apiReq = compatHttps.request(options, (apiRes) => {
             let data = '';
             apiRes.on('data', chunk => { data += chunk; });
             apiRes.on('end', () => {
@@ -479,6 +1920,93 @@ Please redefine this card according to the user's feedback.`
         }));
       } catch (err) {
         console.error('Refine card error:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Extract phrases from handwritten notes image
+  if (req.method === 'POST' && req.url === '/api/extract-from-image') {
+    const chunks = [];
+    req.on('data', chunk => { chunks.push(chunk); });
+    req.on('end', async () => {
+      try {
+        const body = Buffer.concat(chunks).toString();
+        const _body = JSON.parse(body);
+        const { image } = _body; // base64 data URL
+        if (!image) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing image data' }));
+          return;
+        }
+
+        // Image extraction needs an OpenAI vision model — force GPT-4o regardless of selection
+        const imgModel = OPENAI_MODELS.has(pickModel(_body)) ? pickModel(_body) : 'gpt-4o';
+        const payload = JSON.stringify({
+          model: imgModel,
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert at reading handwritten notes. The user has uploaded a photo of handwritten notes containing English vocabulary words, idioms, or phrases they want to learn.
+
+Extract every distinct word, phrase, or idiom you can read from the image. The handwriting may be messy or illegible in places — do your best to interpret it. If you're unsure about a word, make your best guess based on context.
+
+Return a JSON array of strings, one per word/phrase found. Only include the raw words/phrases, no definitions or explanations. Deduplicate and clean up capitalization.
+
+Example output: ["break the ice", "eloquent", "beat around the bush", "tenacious"]
+
+Only output valid JSON, nothing else.`
+            },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: 'Extract all vocabulary words and phrases from these handwritten notes:' },
+                { type: 'image_url', image_url: { url: image } }
+              ]
+            }
+          ],
+          temperature: 0.3,
+          max_completion_tokens: 1000
+        });
+
+        const https = require('https');
+        const options = buildRequestOptions(payload);
+
+        const apiReq = compatHttps.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('OpenAI vision error:', data);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Vision API error' }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices[0].message.content.trim();
+              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+              const phrases = JSON.parse(jsonStr);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ phrases }));
+            } catch (e) {
+              console.error('Parse error:', e.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse extracted phrases' }));
+            }
+          });
+        });
+
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        console.error('Image extract error:', err.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
@@ -551,18 +2079,9 @@ Please redefine this card according to the user's feedback.`
         });
 
         const https = require('https');
-        const options = {
-          hostname: 'api.openai.com',
-          path: '/v1/chat/completions',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'Content-Length': Buffer.byteLength(payload),
-          },
-        };
+        const options = buildRequestOptions(payload);
 
-        const apiReq = https.request(options, (apiRes) => {
+        const apiReq = compatHttps.request(options, (apiRes) => {
           let data = '';
           apiRes.on('data', chunk => { data += chunk; });
           apiRes.on('end', () => {
@@ -645,18 +2164,9 @@ Return JSON: {"note":"optional note","groups":[{"label":"Group Name","items":[{"
         });
 
         const https = require('https');
-        const options = {
-          hostname: 'api.openai.com',
-          path: '/v1/chat/completions',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'Content-Length': Buffer.byteLength(payload),
-          },
-        };
+        const options = buildRequestOptions(payload);
 
-        const apiReq = https.request(options, (apiRes) => {
+        const apiReq = compatHttps.request(options, (apiRes) => {
           let data = '';
           apiRes.on('data', chunk => { data += chunk; });
           apiRes.on('end', () => {
@@ -716,13 +2226,17 @@ Return JSON: {"note":"optional note","groups":[{"label":"Group Name","items":[{"
               role: 'system',
               content: `You are a vocabulary and idiom expert. The user has a partial sentence where they can't think of the exact word, phrase, or idiom. They may provide the sentence, the intended meaning, or both. Help them find the missing word.
 
-1. Complete their sentence with the most likely word/phrase/idiom they're looking for.
-2. Provide the full completed sentence.
-3. Suggest 1-3 matching phrases they might be thinking of, with meaning and example.
+CRITICAL: The user marks the gap with one of these placeholders: "..." (three dots), "…" (ellipsis char), "___" (underscores), or "[blank]". Treat THAT EXACT POSITION as the missing slot. The suggested word/phrase/idiom MUST fit grammatically and semantically into that slot — it should be substitutable for the placeholder. Do NOT change the surrounding words; preserve them verbatim around the filled-in slot.
+
+If no placeholder is present, treat the end of the sentence as the gap (or wherever the meaning indicates).
+
+1. Identify the gap and pick the most likely word/phrase/idiom that fills it.
+2. Build the "completedSentence" by replacing the placeholder with the chosen phrase — keep all other words exactly as the user wrote them.
+3. Suggest 1-3 candidate phrases (each must independently fit the slot). Provide each one's meaning and a brief example.
 
 Return JSON:
 {
-  "completedSentence": "The full sentence with the missing word filled in",
+  "completedSentence": "The user's sentence with the placeholder replaced (other words unchanged)",
   "phrases": [
     {"phrase": "...", "category": "word|phrase|idiom", "meaning": "...", "example": "..."}
   ]
@@ -734,18 +2248,9 @@ Return JSON:
         });
 
         const https = require('https');
-        const options = {
-          hostname: 'api.openai.com',
-          path: '/v1/chat/completions',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'Content-Length': Buffer.byteLength(payload),
-          },
-        };
+        const options = buildRequestOptions(payload);
 
-        const apiReq = https.request(options, (apiRes) => {
+        const apiReq = compatHttps.request(options, (apiRes) => {
           let data = '';
           apiRes.on('data', chunk => { data += chunk; });
           apiRes.on('end', () => {
@@ -815,18 +2320,9 @@ Return JSON:
         });
 
         const https = require('https');
-        const options = {
-          hostname: 'api.openai.com',
-          path: '/v1/chat/completions',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'Content-Length': Buffer.byteLength(payload),
-          },
-        };
+        const options = buildRequestOptions(payload);
 
-        const apiReq = https.request(options, (apiRes) => {
+        const apiReq = compatHttps.request(options, (apiRes) => {
           let data = '';
           apiRes.on('data', chunk => { data += chunk; });
           apiRes.on('end', () => {
@@ -903,18 +2399,9 @@ Return JSON:
         });
 
         const https = require('https');
-        const options = {
-          hostname: 'api.openai.com',
-          path: '/v1/chat/completions',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'Content-Length': Buffer.byteLength(payload),
-          },
-        };
+        const options = buildRequestOptions(payload);
 
-        const apiReq = https.request(options, (apiRes) => {
+        const apiReq = compatHttps.request(options, (apiRes) => {
           let data = '';
           apiRes.on('data', chunk => { data += chunk; });
           apiRes.on('end', () => {
@@ -958,12 +2445,16 @@ Return JSON:
     req.on('end', async () => {
       try {
         const _body = JSON.parse(body);
-        const { sentence, word } = _body;
+        const { sentence, word, intendedMeaning } = _body;
         if (!sentence || !word) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing sentence or word' }));
           return;
         }
+
+        const meaningContext = intendedMeaning
+          ? `\nThe user has also explained what they are trying to convey: "${intendedMeaning}". Use this to better judge whether the word fits their intent and suggest alternatives that match what they actually mean.`
+          : '';
 
         const payload = JSON.stringify({
           model: pickModel(_body),
@@ -980,29 +2471,20 @@ Return JSON:
   "originalWordMeaning": "The meaning of the word the user asked about",
   "originalWordExample": "An example sentence where the user's original word WOULD be used correctly and naturally"
 }
-Be concise but helpful. If the word is correct, acknowledge it and still offer alternatives for variety. Always provide originalWordMeaning and originalWordExample showing proper usage of the queried word.`
+Be concise but helpful. If the word is correct, acknowledge it and still offer alternatives for variety. Always provide originalWordMeaning and originalWordExample showing proper usage of the queried word.${meaningContext}`
             },
             {
               role: 'user',
-              content: `Sentence: "${sentence}"\nWord I'm unsure about: "${word}"`
+              content: `Sentence: "${sentence}"\nWord I'm unsure about: "${word}"${intendedMeaning ? `\nWhat I'm trying to say: "${intendedMeaning}"` : ''}`
             }
           ],
           temperature: 0.5
         });
 
         const https = require('https');
-        const options = {
-          hostname: 'api.openai.com',
-          path: '/v1/chat/completions',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'Content-Length': Buffer.byteLength(payload),
-          },
-        };
+        const options = buildRequestOptions(payload);
 
-        const apiReq = https.request(options, (apiRes) => {
+        const apiReq = compatHttps.request(options, (apiRes) => {
           let data = '';
           apiRes.on('data', chunk => { data += chunk; });
           apiRes.on('end', () => {
@@ -1083,18 +2565,9 @@ Return JSON:
         });
 
         const https = require('https');
-        const options = {
-          hostname: 'api.openai.com',
-          path: '/v1/chat/completions',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'Content-Length': Buffer.byteLength(payload),
-          },
-        };
+        const options = buildRequestOptions(payload);
 
-        const apiReq = https.request(options, (apiRes) => {
+        const apiReq = compatHttps.request(options, (apiRes) => {
           let data = '';
           apiRes.on('data', chunk => { data += chunk; });
           apiRes.on('end', () => {
@@ -1164,7 +2637,7 @@ Return JSON:
           },
         };
 
-        const apiReq = https.request(options, (apiRes) => {
+        const apiReq = compatHttps.request(options, (apiRes) => {
           if (apiRes.statusCode !== 200) {
             let errData = '';
             apiRes.on('data', chunk => { errData += chunk; });
@@ -1227,14 +2700,11 @@ Return JSON:
 });
 
 async function callOpenAI(phrase, correctMeaning, userAnswer, model) {
-  const payload = JSON.stringify({
-    model: model || DEFAULT_MODEL,
-    temperature: 0.3,
-    max_completion_tokens: 200,
-    messages: [
-      {
-        role: 'system',
-        content: `You evaluate whether a user correctly used an English idiom, word, or phrase in an example sentence they wrote. Check that:
+  const m = model || DEFAULT_MODEL;
+  const messages = [
+    {
+      role: 'system',
+      content: `You evaluate whether a user correctly used an English idiom, word, or phrase in an example sentence they wrote. Check that:
 1. The phrase/word is used in the sentence (or a reasonable conjugation/variation of it)
 2. It's used correctly in context with the right meaning
 3. The sentence is grammatically reasonable
@@ -1246,108 +2716,34 @@ Respond in JSON with exactly these fields:
 - "explanation": 1-2 sentences of feedback. If correct, briefly affirm their usage. If partial, say what could be improved. If incorrect, explain the correct usage and give a brief example.
 
 Only output valid JSON, nothing else.`
-      },
-      {
-        role: 'user',
-        content: `Phrase: "${phrase}"\nCorrect meaning: "${correctMeaning}"\nUser's example sentence: "${userAnswer}"`
-      }
-    ]
-  });
-
-  const https = require('https');
-
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Length': Buffer.byteLength(payload),
-      },
-    };
-
-    const apiReq = https.request(options, (apiRes) => {
-      let data = '';
-      apiRes.on('data', chunk => { data += chunk; });
-      apiRes.on('end', () => {
-        if (apiRes.statusCode !== 200) {
-          reject(new Error(`OpenAI API error: ${apiRes.statusCode} — ${data}`));
-          return;
-        }
-        try {
-          const parsed = JSON.parse(data);
-          const content = parsed.choices[0].message.content.trim();
-          const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-          resolve(JSON.parse(jsonStr));
-        } catch (e) {
-          reject(new Error('Failed to parse OpenAI response'));
-        }
-      });
-    });
-
-    apiReq.on('error', reject);
-    apiReq.write(payload);
-    apiReq.end();
-  });
+    },
+    {
+      role: 'user',
+      content: `Phrase: "${phrase}"\nCorrect meaning: "${correctMeaning}"\nUser's example sentence: "${userAnswer}"`
+    }
+  ];
+  const parsed = await chatCompletion(m, messages, { temperature: 0.3, max_tokens: 200 });
+  const content = parsed.choices[0].message.content.trim();
+  const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+  return JSON.parse(jsonStr);
 }
 
 async function generateExample(phrase, meaning, model) {
-  const payload = JSON.stringify({
-    model: model || DEFAULT_MODEL,
-    temperature: 1.2,
-    max_completion_tokens: 100,
-    messages: [
-      {
-        role: 'system',
-        content: `Write one short, natural example sentence using the given English word, phrase, or idiom. The sentence should clearly demonstrate the meaning in context. Be creative — vary the setting, characters, and tone each time (e.g. workplace, travel, relationships, sports, cooking, history). Avoid generic or cliché constructions. Output ONLY the sentence, nothing else.`
-      },
-      {
-        role: 'user',
-        content: meaning
-          ? `Phrase: "${phrase}"\nMeaning: "${meaning}"`
-          : `Phrase: "${phrase}"`
-      }
-    ]
-  });
-
-  const https = require('https');
-
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Length': Buffer.byteLength(payload),
-      },
-    };
-
-    const apiReq = https.request(options, (apiRes) => {
-      let data = '';
-      apiRes.on('data', chunk => { data += chunk; });
-      apiRes.on('end', () => {
-        if (apiRes.statusCode !== 200) {
-          reject(new Error(`OpenAI API error: ${apiRes.statusCode} — ${data}`));
-          return;
-        }
-        try {
-          const parsed = JSON.parse(data);
-          const sentence = parsed.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
-          resolve(sentence);
-        } catch (e) {
-          reject(new Error('Failed to parse OpenAI response'));
-        }
-      });
-    });
-
-    apiReq.on('error', reject);
-    apiReq.write(payload);
-    apiReq.end();
-  });
+  const m = model || DEFAULT_MODEL;
+  const messages = [
+    {
+      role: 'system',
+      content: `Write one short, natural example sentence using the given English word, phrase, or idiom. The sentence should clearly demonstrate the meaning in context. Be creative — vary the setting, characters, and tone each time (e.g. workplace, travel, relationships, sports, cooking, history). Avoid generic or cliché constructions. Output ONLY the sentence, nothing else.`
+    },
+    {
+      role: 'user',
+      content: meaning
+        ? `Phrase: "${phrase}"\nMeaning: "${meaning}"`
+        : `Phrase: "${phrase}"`
+    }
+  ];
+  const parsed = await chatCompletion(m, messages, { temperature: 1.2, max_tokens: 100 });
+  return parsed.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
 }
 
 // Generate a fill-in-the-blank sentence
@@ -1359,14 +2755,11 @@ async function generateBlankSentence(phrase, meaning, model, blankInstruction) {
 - Never blank only function words (e.g. "the", "a", "and", "in", "on", "to")
 - Keep it challenging but fair; avoid giveaways where almost the whole phrase is visible`;
 
-  const payload = JSON.stringify({
-    model: model || DEFAULT_MODEL,
-    temperature: 0.7,
-    max_completion_tokens: 200,
-    messages: [
-      {
-        role: 'system',
-        content: `You create fill-in-the-blank exercises for English vocabulary learning.
+  const m = model || DEFAULT_MODEL;
+  const messages = [
+    {
+      role: 'system',
+      content: `You create fill-in-the-blank exercises for English vocabulary learning.
 
 Given a phrase and meaning, generate:
 1. A natural sentence using the exact phrase in context (do not change phrase wording)
@@ -1382,39 +2775,16 @@ Respond in JSON with exactly these fields:
 - "hint": short meaning/intention clue
 
 Only output valid JSON, nothing else.`
-      },
-      {
-        role: 'user',
-        content: `Phrase: "${phrase}"\nMeaning: "${meaning}"`
-      }
-    ]
-  });
+    },
+    {
+      role: 'user',
+      content: `Phrase: "${phrase}"\nMeaning: "${meaning}"`
+    }
+  ];
 
-  const https = require('https');
-
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Length': Buffer.byteLength(payload),
-      },
-    };
-
-    const apiReq = https.request(options, (apiRes) => {
-      let data = '';
-      apiRes.on('data', chunk => { data += chunk; });
-      apiRes.on('end', () => {
-        if (apiRes.statusCode !== 200) {
-          reject(new Error(`OpenAI API error: ${apiRes.statusCode} — ${data}`));
-          return;
-        }
-        try {
-          const parsed = JSON.parse(data);
-          const content = parsed.choices[0].message.content.trim();
+  try {
+    const parsed = await chatCompletion(m, messages, { temperature: 0.7, max_tokens: 200 });
+    const content = parsed.choices[0].message.content.trim();
           const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
           const result = JSON.parse(jsonStr);
           const fullSentence = (result.sentence || '').trim();
@@ -1460,23 +2830,16 @@ Only output valid JSON, nothing else.`
           if (!/_____/.test(sentenceWithBlank)) sentenceWithBlank += ' _____';
 
           const answerCategory = answer.split(/\s+/).length > 1 ? 'phrase' : 'word';
-          resolve({
+          return {
             sentence: sentenceWithBlank,
             fullSentence: fullSentence || '',
             hint,
             answer,
             answerCategory
-          });
-        } catch (e) {
-          reject(new Error('Failed to parse OpenAI response'));
-        }
-      });
-    });
-
-    apiReq.on('error', reject);
-    apiReq.write(payload);
-    apiReq.end();
-  });
+          };
+  } catch (e) {
+    throw new Error('Failed to generate blank sentence: ' + e.message);
+  }
 }
 
 const FUNCTION_WORDS = new Set([
@@ -1644,18 +3007,129 @@ function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Build a regex that matches the phrase even when the first word is conjugated
-// e.g. "beat around the bush" also matches "beating around the bush", "beats around the bush"
+// Pronoun placeholders that should match any word in the sentence
+const PRONOUN_PLACEHOLDERS = new Set([
+  'someone', 'somebody', 'something', 'oneself', "one's",
+  'anyone', 'anybody', 'anything',
+]);
+// Possessive/object pronouns that may be swapped in context
+const FLEXIBLE_PRONOUNS = new Set([
+  'their', 'them', 'they', 'his', 'her', 'your', 'my', 'our',
+]);
+
+// Common irregular verb forms: base → [past, past participle, present participle, 3rd person]
+const IRREGULAR_VERBS = {
+  'hold': ['held', 'held', 'holding', 'holds'],
+  'beat': ['beat', 'beaten', 'beating', 'beats'],
+  'break': ['broke', 'broken', 'breaking', 'breaks'],
+  'bring': ['brought', 'brought', 'bringing', 'brings'],
+  'bite': ['bit', 'bitten', 'biting', 'bites'],
+  'blow': ['blew', 'blown', 'blowing', 'blows'],
+  'burn': ['burned', 'burnt', 'burning', 'burns'],
+  'buy': ['bought', 'bought', 'buying', 'buys'],
+  'catch': ['caught', 'caught', 'catching', 'catches'],
+  'come': ['came', 'come', 'coming', 'comes'],
+  'cut': ['cut', 'cut', 'cutting', 'cuts'],
+  'dig': ['dug', 'dug', 'digging', 'digs'],
+  'do': ['did', 'done', 'doing', 'does'],
+  'draw': ['drew', 'drawn', 'drawing', 'draws'],
+  'drink': ['drank', 'drunk', 'drinking', 'drinks'],
+  'drive': ['drove', 'driven', 'driving', 'drives'],
+  'eat': ['ate', 'eaten', 'eating', 'eats'],
+  'fall': ['fell', 'fallen', 'falling', 'falls'],
+  'feel': ['felt', 'felt', 'feeling', 'feels'],
+  'fight': ['fought', 'fought', 'fighting', 'fights'],
+  'find': ['found', 'found', 'finding', 'finds'],
+  'fly': ['flew', 'flown', 'flying', 'flies'],
+  'get': ['got', 'gotten', 'getting', 'gets'],
+  'give': ['gave', 'given', 'giving', 'gives'],
+  'go': ['went', 'gone', 'going', 'goes'],
+  'grow': ['grew', 'grown', 'growing', 'grows'],
+  'hang': ['hung', 'hung', 'hanging', 'hangs'],
+  'have': ['had', 'had', 'having', 'has'],
+  'hear': ['heard', 'heard', 'hearing', 'hears'],
+  'hide': ['hid', 'hidden', 'hiding', 'hides'],
+  'hit': ['hit', 'hit', 'hitting', 'hits'],
+  'keep': ['kept', 'kept', 'keeping', 'keeps'],
+  'know': ['knew', 'known', 'knowing', 'knows'],
+  'lay': ['laid', 'laid', 'laying', 'lays'],
+  'lead': ['led', 'led', 'leading', 'leads'],
+  'leave': ['left', 'left', 'leaving', 'leaves'],
+  'lend': ['lent', 'lent', 'lending', 'lends'],
+  'let': ['let', 'let', 'letting', 'lets'],
+  'lie': ['lay', 'lain', 'lying', 'lies'],
+  'lose': ['lost', 'lost', 'losing', 'loses'],
+  'make': ['made', 'made', 'making', 'makes'],
+  'mean': ['meant', 'meant', 'meaning', 'means'],
+  'meet': ['met', 'met', 'meeting', 'meets'],
+  'pay': ['paid', 'paid', 'paying', 'pays'],
+  'put': ['put', 'put', 'putting', 'puts'],
+  'read': ['read', 'read', 'reading', 'reads'],
+  'ride': ['rode', 'ridden', 'riding', 'rides'],
+  'ring': ['rang', 'rung', 'ringing', 'rings'],
+  'rise': ['rose', 'risen', 'rising', 'rises'],
+  'run': ['ran', 'run', 'running', 'runs'],
+  'say': ['said', 'said', 'saying', 'says'],
+  'see': ['saw', 'seen', 'seeing', 'sees'],
+  'sell': ['sold', 'sold', 'selling', 'sells'],
+  'send': ['sent', 'sent', 'sending', 'sends'],
+  'set': ['set', 'set', 'setting', 'sets'],
+  'shake': ['shook', 'shaken', 'shaking', 'shakes'],
+  'shoot': ['shot', 'shot', 'shooting', 'shoots'],
+  'show': ['showed', 'shown', 'showing', 'shows'],
+  'shut': ['shut', 'shut', 'shutting', 'shuts'],
+  'sing': ['sang', 'sung', 'singing', 'sings'],
+  'sit': ['sat', 'sat', 'sitting', 'sits'],
+  'speak': ['spoke', 'spoken', 'speaking', 'speaks'],
+  'spend': ['spent', 'spent', 'spending', 'spends'],
+  'stand': ['stood', 'stood', 'standing', 'stands'],
+  'steal': ['stole', 'stolen', 'stealing', 'steals'],
+  'stick': ['stuck', 'stuck', 'sticking', 'sticks'],
+  'strike': ['struck', 'struck', 'striking', 'strikes'],
+  'swim': ['swam', 'swum', 'swimming', 'swims'],
+  'take': ['took', 'taken', 'taking', 'takes'],
+  'teach': ['taught', 'taught', 'teaching', 'teaches'],
+  'tear': ['tore', 'torn', 'tearing', 'tears'],
+  'tell': ['told', 'told', 'telling', 'tells'],
+  'think': ['thought', 'thought', 'thinking', 'thinks'],
+  'throw': ['threw', 'thrown', 'throwing', 'throws'],
+  'wear': ['wore', 'worn', 'wearing', 'wears'],
+  'win': ['won', 'won', 'winning', 'wins'],
+  'write': ['wrote', 'written', 'writing', 'writes'],
+};
+
+// Build a regex pattern for a single word, handling verb inflections
+function buildWordPattern(word, isFirstWord) {
+  const lower = word.toLowerCase();
+
+  // Pronoun placeholders match any word
+  if (PRONOUN_PLACEHOLDERS.has(lower)) return "\\S+(?:'s)?";
+  // Flexible pronouns match common pronoun alternatives
+  if (FLEXIBLE_PRONOUNS.has(lower)) return "(?:their|them|they|his|him|her|hers|your|yours|my|mine|our|ours|its|one's)";
+
+  // Check irregular verb table
+  const irregular = IRREGULAR_VERBS[lower];
+  if (irregular) {
+    const allForms = new Set([lower, ...irregular]);
+    return '(?:' + [...allForms].map(escapeRegex).join('|') + ')';
+  }
+
+  // For the first word (or any verb-like word), add regular inflection suffixes
+  if (isFirstWord) {
+    const base = word.replace(/e$/i, '');
+    return escapeRegex(base) + 'e?' + '(?:s|es|ed|d|ing|en|ting)?';
+  }
+
+  return escapeRegex(word);
+}
+
+// Build a regex that matches the phrase even when conjugated or with pronoun substitutions
+// e.g. "hold someone to their promise" matches "held him to his promise"
 function buildInflectedPhrasePattern(phrase) {
   const words = phrase.trim().split(/\s+/);
   if (words.length === 0) return new RegExp(escapeRegex(phrase), 'i');
-  // Allow the first word to have common verb suffixes: -s, -es, -ed, -ing, -en, -d
-  // Also handle e-dropping (e.g. "make" → "making") by making trailing 'e' optional
-  const base = words[0].replace(/e$/i, '');
-  const firstWordPattern = escapeRegex(base) + 'e?' + '(?:s|es|ed|d|ing|en|ting)?';
-  const rest = words.slice(1).map(escapeRegex).join('\\s+');
-  const full = rest ? firstWordPattern + '\\s+' + rest : firstWordPattern;
-  return new RegExp(full, 'i');
+  const patterns = words.map((w, i) => buildWordPattern(w, i === 0));
+  return new RegExp(patterns.join('\\s+'), 'i');
 }
 
 function sentenceContainsPhrase(sentence, phrase) {
@@ -1800,18 +3274,9 @@ Only output valid JSON, nothing else.`
   const https = require('https');
 
   return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Length': Buffer.byteLength(payload),
-      },
-    };
+    const options = buildRequestOptions(payload);
 
-    const apiReq = https.request(options, (apiRes) => {
+    const apiReq = compatHttps.request(options, (apiRes) => {
       let data = '';
       apiRes.on('data', chunk => { data += chunk; });
       apiRes.on('end', () => {
@@ -1857,9 +3322,10 @@ function saveCardsToDb(cards) {
 }
 
 async function enrichBatch(phrases, model) {
+  const _m = model || DEFAULT_MODEL;
   const numbered = phrases.map((p, i) => `${i + 1}. ${p}`).join('\n');
   const payload = JSON.stringify({
-    model: model || DEFAULT_MODEL,
+    model: _m,
     temperature: 0.3,
     max_completion_tokens: 2000,
     messages: [
@@ -1889,18 +3355,9 @@ Only output valid JSON, nothing else.`
   const https = require('https');
 
   return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Length': Buffer.byteLength(payload),
-      },
-    };
+    const options = buildRequestOptions(payload);
 
-    const apiReq = https.request(options, (apiRes) => {
+    const apiReq = compatHttps.request(options, (apiRes) => {
       let data = '';
       apiRes.on('data', chunk => { data += chunk; });
       apiRes.on('end', () => {

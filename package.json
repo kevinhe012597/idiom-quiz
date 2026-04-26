@@ -8,5 +8,8 @@
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "mammoth": "^1.12.0"
   }
 }
