@@ -1546,18 +1546,17 @@ textarea { resize: vertical; min-height: 80px; }
 .value-badge.medium { background: rgba(59,130,246,0.15); color: #2563eb; }
 .value-badge.low    { background: var(--surface2); color: var(--text-dim); }
 
-/* Merge preview modal — opens when user merges 2+ selected cards in Browse */
+/* Merge preview modal — opens when user merges 2+ selected cards in Browse.
+   Default hidden via inline style="display:none"; opening sets style.display='flex'. */
 .concept-merge-modal {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.5);
   z-index: 9998;
-  display: flex !important;
   align-items: center;
   justify-content: center;
   padding: 20px;
 }
-.concept-merge-modal[style*="display:none"] { display: none !important; }
 .concept-merge-card {
   background: var(--bg);
   border-radius: 16px;
