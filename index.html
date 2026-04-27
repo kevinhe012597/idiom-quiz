@@ -2266,6 +2266,27 @@ textarea { resize: vertical; min-height: 80px; }
     </div>
   </div>
 
+  <!-- 3b. Name this vibe -->
+  <div class="lookup-section" id="lookup-section-vibe">
+    <div class="lookup-section-header" onclick="toggleLookupSection('vibe')">
+      <div class="lookup-section-title">
+        <span class="lookup-section-icon">🎭</span>
+        <div>
+          <div class="lookup-section-name">Name this vibe</div>
+          <div class="lookup-section-desc">Paste a quote or describe a moment — get words for the tone</div>
+          <span class="lookup-usage-badge" id="usage-vibe"></span>
+        </div>
+      </div>
+      <span class="lookup-section-chevron" id="chevron-vibe">▸</span>
+    </div>
+    <div class="lookup-section-body" id="body-vibe" style="display:none;">
+      <label style="font-size:0.8rem; color:var(--text-dim); margin-bottom:4px; display:block;">The exchange or moment</label>
+      <textarea id="vibe-input" rows="4" placeholder='e.g. I said "wow you should start a podcast after that talk!" and they said "well I already have a podcast" — what was that energy?' style="width:100%; padding:10px 14px; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-size:0.9rem; font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
+      <button class="btn-primary" id="vibe-btn" onclick="doNameVibe()" style="width:100%; margin-top:10px;">Name the vibe</button>
+      <div id="vibe-results" style="display:none;"></div>
+    </div>
+  </div>
+
   <!-- 4. Synonyms -->
   <div class="lookup-section" id="lookup-section-synonyms">
     <div class="lookup-section-header" onclick="toggleLookupSection('synonyms')">
@@ -4964,16 +4985,16 @@ let lookupData = null;
 
 function showLookup() {
   // Clear all inputs and results
-  ['lookup-input','translate-input','reverse-input','critique-sentence','critique-word','synonym-input','polish-input','complete-input','complete-meaning','en2zh-input'].forEach(id => {
+  ['lookup-input','translate-input','reverse-input','vibe-input','critique-sentence','critique-word','synonym-input','polish-input','complete-input','complete-meaning','en2zh-input'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  ['lookup-result','translate-result','reverse-results','critique-result','synonym-results','polish-result','complete-result','en2zh-result'].forEach(id => {
+  ['lookup-result','translate-result','reverse-results','vibe-results','critique-result','synonym-results','polish-result','complete-result','en2zh-result'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
   // Collapse all sections
-  ['word','complete','reverse','synonyms','critique','polish','zh2en','en2zh'].forEach(key => {
+  ['word','complete','reverse','vibe','synonyms','critique','polish','zh2en','en2zh'].forEach(key => {
     const body = document.getElementById('body-' + key);
     const chev = document.getElementById('chevron-' + key);
     if (body) body.style.display = 'none';
@@ -5039,7 +5060,7 @@ async function hydrateLookupUsageFromServer() {
 
 function updateLookupBadges() {
   const usage = getLookupUsage();
-  ['word','complete','reverse','synonyms','critique','polish','zh2en','en2zh'].forEach(key => {
+  ['word','complete','reverse','vibe','synonyms','critique','polish','zh2en','en2zh'].forEach(key => {
     const badge = document.getElementById('usage-' + key);
     if (badge) {
       const count = usage[key] || 0;
@@ -5375,6 +5396,90 @@ async function doReverseLookup() {
     btn.disabled = false;
     btn.textContent = 'Find';
   }
+}
+
+async function doNameVibe() {
+  const input = document.getElementById('vibe-input');
+  const description = input.value.trim();
+  if (!description) { showToast('Paste an exchange or describe the moment first'); return; }
+  trackLookupUsage('vibe');
+
+  const btn = document.getElementById('vibe-btn');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = '...';
+
+  try {
+    const response = await apiFetch('/api/name-vibe', { description });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Lookup failed');
+    }
+    const { results } = await response.json();
+    if (!results || results.length === 0) throw new Error('No results found');
+
+    const container = document.getElementById('vibe-results');
+    container.innerHTML = `<div class="lookup-result-header"><span style="font-weight:600; font-size:0.8rem; color:var(--text-dim);">Words for the vibe</span><button class="lookup-clear-btn" onclick="clearLookupResult('vibe-results')">✕ Clear</button></div>` + results.map((r, i) => {
+      const isDupe = cards.some(c => c.phrase.toLowerCase() === r.phrase.toLowerCase());
+      return `<div class="qa-card" style="margin-top:10px;">
+        <div class="qa-card-header">
+          <span class="phrase">${escapeHtml(r.phrase)}</span>
+          <button class="btn-speak btn-speak-inline" onclick="speakText(this, '${escapeHtml(r.phrase).replace(/'/g, "\\'")}')" title="Hear pronunciation">&#128264;</button>
+          <span class="tag">${escapeHtml(r.category || 'word')}</span>
+          ${isDupe ? '<span class="dupe-tag">already in deck</span>' : ''}
+        </div>
+        <div style="margin-top:8px;">
+          <label style="font-size:0.8rem; color:var(--text-dim);">Meaning</label>
+          <div style="font-size:0.95rem; margin-top:4px;">${escapeHtml(r.meaning)}</div>
+        </div>
+        <div class="example-row">
+          <span class="example-text">${escapeHtml(r.example)}</span>
+        </div>
+        <button class="btn-primary" onclick="vibeAddCard(${i})" style="margin-top:8px; width:100%; padding:10px; font-size:0.9rem;"
+          ${isDupe ? 'disabled style="margin-top:8px; width:100%; padding:10px; font-size:0.9rem; opacity:0.5;"' : ''}>
+          ${isDupe ? 'Already in Deck' : 'Add to Deck'}
+        </button>
+      </div>`;
+    }).join('');
+    container.style.display = 'block';
+
+    window._vibeResults = results;
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
+async function vibeAddCard(index) {
+  const r = window._vibeResults && window._vibeResults[index];
+  if (!r) return;
+  const today = getToday();
+  const now = new Date().toISOString();
+
+  cards.unshift({
+    id: generateId(),
+    phrase: r.phrase,
+    meaning: r.meaning || '',
+    example: r.example || '',
+    category: r.category || 'word',
+    bucket: undefined,
+    createdAt: now,
+    source: 'Name the Vibe',
+    sourceContext: document.getElementById('vibe-input').value.trim() || null,
+    easeFactor: 2.5,
+    interval: 0,
+    repetitions: 0,
+    nextReview: today,
+    lastReview: null
+  });
+
+  await saveCards(cards);
+  updateDashboard();
+  showToast(`Added "${r.phrase}" to deck`);
+  // Re-run rendering so the button updates to "Already in Deck"
+  doNameVibe();
 }
 
 async function reverseAddCard(index) {

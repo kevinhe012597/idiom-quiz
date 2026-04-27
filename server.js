@@ -2183,6 +2183,87 @@ Only output valid JSON, nothing else.`
   }
 
   // Reverse lookup: description → matching words/phrases
+  // Name-this-vibe: given a quote, exchange, or description of a social dynamic,
+  // return words that capture the TONE / DEMEANOR / EMOTIONAL TEXTURE
+  // (e.g. "defensive", "dismissive", "passive-aggressive", "earnest", "patronizing").
+  // Distinct from /api/reverse-lookup, which targets concepts not affect.
+  if (req.method === 'POST' && req.url === '/api/name-vibe') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { description } = _body;
+        if (!description) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing description' }));
+          return;
+        }
+
+        const payload = JSON.stringify({
+          model: pickModel(_body),
+          messages: [
+            {
+              role: 'system',
+              content: `You are a vocabulary expert specializing in social and emotional language. Given a quote, an exchange between people, or a description of a moment, suggest 4-6 English words, idioms, or phrases that capture the TONE, DEMEANOR, or EMOTIONAL TEXTURE — how the speaker is being or how the dynamic feels.
+
+Examples of the kind of words you'd return:
+- defensive, dismissive, deflective, evasive, condescending, patronizing
+- earnest, sincere, candid, vulnerable, self-deprecating
+- passive-aggressive, cutting, snide, sardonic, biting
+- enthusiastic, gushing, effusive, fawning, sycophantic
+- hedging, equivocating, mealy-mouthed, weaselly
+- magnanimous, gracious, generous-spirited
+
+For each, provide the phrase, its category (word, phrase, or idiom), a concise meaning that explains the tone/dynamic, and a natural example sentence showing the word used to describe how someone is acting.
+
+Return ONLY valid JSON array with this exact shape: [{"phrase":"...","category":"...","meaning":"...","example":"..."}]`
+            },
+            {
+              role: 'user',
+              content: description
+            }
+          ],
+          temperature: 0.8
+        });
+
+        const options = buildRequestOptions(payload);
+        const apiReq = compatHttps.request(options, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `API error: ${apiRes.statusCode}` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices[0].message.content.trim();
+              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+              const results = JSON.parse(jsonStr);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ results }));
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(payload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/reverse-lookup') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
