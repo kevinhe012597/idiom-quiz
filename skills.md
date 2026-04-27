@@ -54,6 +54,13 @@ Don't just list surface-level facts (school, birth year, founding date). Always 
 
 When the concept is a specific entity, the bullets MUST cover these specific facts. Use web search if you don't know them.
 
+**CRITICAL — pick ONE category and follow only its rules.** Do NOT borrow framings across categories. In particular:
+
+- "Use case" / "buyer persona" / "competitors" / "sector" bullets are for **Startups / Companies ONLY.** Never include them for people (politicians, actors, musicians, athletes, scientists, executives) or for abstract concepts. Asking who the "competitors" of a movie star or politician are reads as a category error.
+- "Signature policies" / "legislative achievements" are for **Politicians ONLY.**
+- "Most famous works" / "career arc" are for **Pop Culture Figures ONLY.**
+- If the entity doesn't match any category cleanly, fall back to the generic "People" or "Concepts" section — don't force-fit a startup framing.
+
 ### Startups / Companies
 - ONE dense bullet packing: funding series, latest valuation, lead investors per round (e.g. "Series C at $5B led by Sequoia in 2024; prior Series B led by a16z in 2023, Series A led by Greylock in 2022")
 - ONE bullet covering: founding date, founder name(s), and founder background (prior company / education only if relevant to what they're building)
@@ -72,12 +79,14 @@ When the concept is a specific entity, the bullets MUST cover these specific fac
 - ONE-TWO bullets on their signature policies or legislative achievements (specific bills, executive orders, votes)
 - Plus controversies, signature quotes, factional alignment within their party
 - Plus the standard TL;DR cocktail-party bullet at the top
+- **DO NOT include** a "use case" bullet, a "competitors" bullet, or a "sector" bullet. Those are startup-only framings.
 
 ### Pop Culture Figures (artists, actors, musicians, athletes)
 - ONE bullet on how long they've been active + their career arc (breakthrough year, peak period)
 - ONE-TWO bullets naming their most famous works (movies, albums, songs, performances) — be specific with titles and years
 - Plus their cultural significance, signature style, controversies, collaborations
 - Plus the standard TL;DR cocktail-party bullet at the top
+- **DO NOT include** a "use case" bullet (buyer persona / workflow), a "competitors" bullet, or a "sector" bullet. Those are startup-only framings and read as category errors when applied to a person.
 
 ### Concepts / Ideas / Frameworks
 - ONE bullet on the core idea — what it actually claims
@@ -91,6 +100,7 @@ When the concept is a specific entity, the bullets MUST cover these specific fac
 - Cover signature ideas/views/decisions, famous quotes, controversies
 - Mention background only if it shapes their worldview or is genuinely surprising
 - Plus the standard TL;DR cocktail-party bullet at the top
+- **DO NOT include** a "use case" bullet, a "competitors" bullet, or a "sector" bullet — even for executives. If the card is about a *person*, those startup-only framings don't apply. (If you really need to talk about the company they lead, make a separate Startup card for the company.)
 
 ## Source Inference
 
