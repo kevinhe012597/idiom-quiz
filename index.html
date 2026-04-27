@@ -2717,7 +2717,10 @@ textarea { resize: vertical; min-height: 80px; }
     <button id="concept-browse-select-btn" onclick="toggleConceptSelectMode()" style="background:none; border:none; color:var(--concept); font-size:0.95rem; font-weight:600; cursor:pointer;">Select</button>
   </div>
   <input type="text" id="concept-browse-search" placeholder="Search by title, tag, or summary..." autocomplete="off" oninput="renderConceptBrowse()" style="margin-bottom:8px;">
-  <div id="concept-browse-tag-filters" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;"></div>
+  <div style="display:flex; gap:8px; margin-bottom:8px; align-items:flex-start;">
+    <div id="concept-browse-tag-filters" style="display:flex; flex-wrap:wrap; gap:6px; flex:1;"></div>
+    <button onclick="openManageTagsModal()" class="btn-secondary" style="width:auto; padding:5px 12px; font-size:0.72rem; white-space:nowrap; align-self:flex-start;" title="Delete tags from your taxonomy">⚙ Manage</button>
+  </div>
   <div id="concept-browse-time-filters" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;"></div>
   <div id="concept-browse-bulk-toolbar" style="display:none; padding:10px 12px; background:var(--surface1); border-radius:10px; margin-bottom:10px; align-items:center; gap:8px; flex-wrap:wrap;">
     <span id="concept-browse-selected-count" style="font-size:0.85rem; color:var(--text); font-weight:600;">0 selected</span>
@@ -2726,6 +2729,18 @@ textarea { resize: vertical; min-height: 80px; }
     <div style="flex:1"></div>
     <button id="concept-batch-merge-btn" onclick="mergeSelectedConcepts()" class="btn-secondary" style="width:auto; padding:7px 14px; font-size:0.8rem; white-space:nowrap;" title="Combine selected cards into one (need 2+)" disabled>🔀 Merge selected</button>
     <button id="concept-batch-refresh-btn" onclick="batchRefreshSelectedConcepts()" class="btn-primary concept-btn" style="width:auto; padding:7px 14px; font-size:0.8rem; white-space:nowrap;">↻ Refresh selected</button>
+  </div>
+
+  <!-- Manage tags modal -->
+  <div id="concept-manage-tags-modal" class="concept-merge-modal" style="display:none;">
+    <div class="concept-merge-card" style="max-width:640px;">
+      <div class="concept-merge-header">
+        <h3 style="margin:0; color:var(--concept); font-size:1.1rem;">⚙ Manage tags</h3>
+        <button onclick="closeManageTagsModal()" style="background:none; border:none; font-size:1.5rem; line-height:1; cursor:pointer; color:var(--text-dim);">×</button>
+      </div>
+      <p style="font-size:0.8rem; color:var(--text-dim); margin:4px 0 12px 0;">Deleting a tag removes it from every card that has it. The card itself is kept.</p>
+      <div id="concept-manage-tags-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+    </div>
   </div>
 
   <!-- Merge preview modal -->
@@ -8886,6 +8901,56 @@ function clearConceptTagFilters() {
   conceptBrowseIncludeTags.clear();
   conceptBrowseExcludeTags.clear();
   renderConceptBrowse();
+}
+
+function openManageTagsModal() {
+  renderManageTagsList();
+  document.getElementById('concept-manage-tags-modal').style.display = 'flex';
+}
+
+function closeManageTagsModal() {
+  document.getElementById('concept-manage-tags-modal').style.display = 'none';
+}
+
+function renderManageTagsList() {
+  const list = document.getElementById('concept-manage-tags-list');
+  if (!list) return;
+  // Build {tag: count} from the live concepts array
+  const counts = {};
+  concepts.forEach(c => (c.tags || []).forEach(t => { if (t) counts[t] = (counts[t] || 0) + 1; }));
+  const entries = Object.entries(counts).sort((a, b) => a[0].localeCompare(b[0]));
+  if (entries.length === 0) {
+    list.innerHTML = '<div style="padding:12px; color:var(--text-dim); font-size:0.85rem;">No tags yet.</div>';
+    return;
+  }
+  list.innerHTML = entries.map(([tag, count]) => `
+    <div style="display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--surface1); border-radius:8px;">
+      <span style="font-weight:600; color:var(--concept);">${escapeHtml(tag)}</span>
+      <span style="font-size:0.8rem; color:var(--text-dim);">${count} card${count === 1 ? '' : 's'}</span>
+      <div style="flex:1;"></div>
+      <button onclick="deleteTagEverywhere('${tag.replace(/'/g, "\\'")}')" class="btn-secondary" style="width:auto; padding:5px 12px; font-size:0.78rem; color:var(--red); border-color:rgba(239,68,68,0.4);">Delete</button>
+    </div>
+  `).join('');
+}
+
+function deleteTagEverywhere(tag) {
+  const count = concepts.filter(c => (c.tags || []).includes(tag)).length;
+  if (!confirm(`Delete the tag "${tag}" from all ${count} card${count === 1 ? '' : 's'}?\n\nThe cards stay; only the tag is removed.`)) return;
+
+  concepts.forEach(c => {
+    if (c.tags && c.tags.includes(tag)) {
+      c.tags = c.tags.filter(t => t !== tag);
+    }
+  });
+  // Also remove from any active filter sets
+  conceptBrowseIncludeTags.delete(tag);
+  conceptBrowseExcludeTags.delete(tag);
+
+  saveConcepts(concepts);
+  scheduleServerConceptSync();
+  renderManageTagsList();
+  renderConceptBrowse();
+  showToast(`Deleted tag "${tag}" from ${count} card${count === 1 ? '' : 's'}`);
 }
 
 let conceptViewId = null;
