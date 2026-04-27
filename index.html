@@ -1244,10 +1244,21 @@ textarea { resize: vertical; min-height: 80px; }
 .lookup-result-wide { width: 100%; }
 .lookup-result-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
 @media (min-width: 900px) {
-  /* Concept lookup: always wide */
+  /* Concept lookup: wide because it has a 2-col grid (result + chat) */
   #concept-lookup {
     width: calc(100vw - 80px);
     max-width: 1280px;
+    margin-left: 50%;
+    transform: translateX(-50%);
+  }
+  /* Other concept screens: break out of the 640px vocab container so long
+     titles and bullets aren't truncated. Single column, just wider. */
+  #concept-add-edit,
+  #concept-browse,
+  #concept-view,
+  #concepts-dashboard {
+    width: calc(100vw - 80px);
+    max-width: 1100px;
     margin-left: 50%;
     transform: translateX(-50%);
   }
