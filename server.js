@@ -1097,6 +1097,154 @@ ${existingTagsBlock(existingTags)}`
     return;
   }
 
+  // Fetch + extract article body from a URL (Mozilla Readability)
+  if (req.method === 'POST' && req.url === '/api/fetch-article') {
+    let body = '';
+    req.on('data', c => { body += c; });
+    req.on('end', async () => {
+      try {
+        const { url } = JSON.parse(body);
+        if (!url || typeof url !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing url' }));
+          return;
+        }
+        let parsedUrl;
+        try { parsedUrl = new URL(url); } catch (_) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid URL' }));
+          return;
+        }
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Only http(s) URLs allowed' }));
+          return;
+        }
+        if (/(?:^|\.)(youtube\.com|youtu\.be)$/i.test(parsedUrl.hostname)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'YouTube URLs — use the YouTube tab instead' }));
+          return;
+        }
+
+        // Fetch with browser-like headers + 12s timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        let resp;
+        try {
+          resp = await fetch(url, {
+            redirect: 'follow',
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+          });
+        } catch (e) {
+          clearTimeout(timeoutId);
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.name === 'AbortError' ? 'Request timed out' : ('Fetch failed: ' + e.message) }));
+          return;
+        }
+        clearTimeout(timeoutId);
+
+        if (!resp.ok) {
+          // 401/403/429 strongly suggest paywall or rate-limit
+          const status = resp.status;
+          const isPaywall = status === 401 || status === 402 || status === 403 || status === 429;
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: `Server returned HTTP ${status}`,
+            paywalled: isPaywall,
+            paywallReason: isPaywall ? `Site returned HTTP ${status} — likely paywalled or bot-blocked` : undefined,
+          }));
+          return;
+        }
+
+        const ctype = resp.headers.get('content-type') || '';
+        if (!/text\/html|application\/xhtml/i.test(ctype)) {
+          res.writeHead(415, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: `Unsupported content-type: ${ctype}` }));
+          return;
+        }
+
+        const html = await resp.text();
+        const finalUrl = resp.url || url;
+
+        // Run Readability
+        const { JSDOM } = require('jsdom');
+        const { Readability } = require('@mozilla/readability');
+        const dom = new JSDOM(html, { url: finalUrl });
+        const article = new Readability(dom.window.document).parse();
+        const title = article?.title || dom.window.document.title || '';
+        const text = (article?.textContent || '').trim();
+        const excerpt = (article?.excerpt || '').trim();
+        const byline = (article?.byline || '').trim();
+        const siteName = (article?.siteName || '').trim();
+        const length = text.length;
+
+        // Paywall heuristics
+        const PAYWALL_HOSTS = [
+          'nytimes.com','wsj.com','ft.com','bloomberg.com','economist.com',
+          'theinformation.com','newyorker.com','wired.com','theatlantic.com',
+          'washingtonpost.com','barrons.com','foreignaffairs.com','hbr.org',
+          'medium.com','seekingalpha.com','stratechery.com','restofworld.org',
+        ];
+        const hostMatchesPaywall = PAYWALL_HOSTS.some(h => parsedUrl.hostname.endsWith(h));
+        const PAYWALL_PHRASES = [
+          'subscribe to read', 'subscribers only', 'subscriber-only',
+          'log in to continue', 'sign in to continue reading',
+          'this article is for subscribers', 'create a free account to continue',
+          'become a subscriber', 'subscribe now to keep reading',
+          'subscribe to keep reading', 'paid subscribers only',
+          'access this story', 'unlock this article', 'unlock the full',
+        ];
+        const lowerText = text.toLowerCase();
+        const lowerHtml = html.toLowerCase();
+        const phraseHit = PAYWALL_PHRASES.find(p => lowerText.includes(p) || lowerHtml.includes(p));
+        const tooShort = length > 0 && length < 600;
+        const empty = length === 0;
+
+        let paywalled = false;
+        let paywallReason = '';
+        if (empty) {
+          paywalled = true;
+          paywallReason = 'No article body could be extracted — likely paywalled, JS-rendered, or bot-blocked';
+        } else if (phraseHit) {
+          paywalled = true;
+          paywallReason = `Paywall phrase detected: "${phraseHit}"`;
+        } else if (tooShort && hostMatchesPaywall) {
+          paywalled = true;
+          paywallReason = `Only ${length} chars extracted from a typically-paywalled site (${parsedUrl.hostname}) — likely truncated`;
+        } else if (tooShort) {
+          paywalled = true;
+          paywallReason = `Only ${length} chars extracted — article body looks truncated`;
+        }
+
+        // Suggested source label
+        let suggestedSource = '';
+        const pubName = siteName || parsedUrl.hostname.replace(/^www\./, '');
+        if (title && pubName) suggestedSource = `${pubName}: ${title}`.slice(0, 100);
+        else if (title) suggestedSource = title.slice(0, 100);
+        else if (pubName) suggestedSource = pubName;
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          url: finalUrl,
+          title, text, excerpt, byline, siteName,
+          length,
+          paywalled,
+          paywallReason: paywalled ? paywallReason : undefined,
+          suggestedSource,
+        }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   // Extract concepts from article/transcript text — synchronous (waits for completion)
   if (req.method === 'POST' && req.url === '/api/extract-concepts') {
     let body = '';

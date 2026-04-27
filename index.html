@@ -2615,6 +2615,12 @@ textarea { resize: vertical; min-height: 80px; }
       <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:12px;">
         Paste an article, transcript, or meeting notes. AI will extract key concepts, companies, and trends.
       </p>
+      <!-- URL fetch bar -->
+      <div style="display:flex; gap:6px; margin-bottom:8px;">
+        <input type="text" id="concept-article-url" placeholder="Or paste an article URL (https://...)" autocomplete="off" style="flex:1; padding:10px 14px; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-size:0.85rem; box-sizing:border-box;" onkeydown="if(event.key==='Enter'){event.preventDefault();fetchArticleFromUrl();}">
+        <button type="button" id="concept-article-url-btn" class="btn-secondary" onclick="fetchArticleFromUrl()" style="width:auto; padding:10px 16px; font-size:0.85rem; white-space:nowrap;">Fetch</button>
+      </div>
+      <div id="concept-article-url-banner" style="display:none; margin-bottom:8px; padding:10px 12px; border-radius:10px; font-size:0.82rem; line-height:1.45;"></div>
       <textarea id="concept-article-input" rows="10" placeholder="Paste your article or transcript here..."></textarea>
       <!-- File card shown after upload (PDF/docx) -->
       <div id="concept-file-card" class="file-card" style="display:none; margin-top:8px;">
@@ -7749,6 +7755,9 @@ function conceptQuickReset() {
   document.getElementById('concept-article-guidance').value = '';
   document.getElementById('concept-article-count').value = '';
   document.getElementById('concept-file-input').value = '';
+  const urlEl = document.getElementById('concept-article-url'); if (urlEl) urlEl.value = '';
+  const bannerEl = document.getElementById('concept-article-url-banner'); if (bannerEl) { bannerEl.style.display = 'none'; bannerEl.innerHTML = ''; }
+  delete document.getElementById('concept-article-input').dataset.suggestedSource;
   // Reset file card → empty dropzone state
   const fileCard = document.getElementById('concept-file-card');
   const dz = document.getElementById('concept-dropzone');
@@ -8302,6 +8311,76 @@ async function startBackgroundExtraction(kind, body, sourceHint) {
   return jobId;
 }
 
+async function fetchArticleFromUrl() {
+  const urlInput = document.getElementById('concept-article-url');
+  const banner = document.getElementById('concept-article-url-banner');
+  const btn = document.getElementById('concept-article-url-btn');
+  const ta = document.getElementById('concept-article-input');
+  const url = urlInput.value.trim();
+  if (!url) { showToast('Paste a URL first'); return; }
+  if (!/^https?:\/\//i.test(url)) { showToast('URL must start with http:// or https://'); return; }
+
+  banner.style.display = 'none';
+  btn.disabled = true;
+  const origBtnText = btn.textContent;
+  btn.textContent = 'Fetching…';
+
+  try {
+    const resp = await fetch('/api/fetch-article', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await resp.json();
+
+    if (data.error && !data.text) {
+      banner.style.display = 'block';
+      banner.style.background = 'rgba(239,68,68,0.1)';
+      banner.style.border = '1px solid rgba(239,68,68,0.35)';
+      banner.style.color = 'var(--text)';
+      banner.innerHTML = `<strong>Couldn't fetch:</strong> ${escapeHtml(data.error)}${data.paywalled ? '<br><span style="color:var(--text-dim);">This site appears paywalled. Try copy-pasting the article body manually.</span>' : ''}`;
+      return;
+    }
+
+    // Populate the textarea with the extracted body
+    if (data.text && data.text.length > 0) {
+      ta.value = data.text;
+    }
+
+    if (data.paywalled) {
+      // Paywall warning banner
+      banner.style.display = 'block';
+      banner.style.background = 'rgba(245,158,11,0.12)';
+      banner.style.border = '1px solid rgba(245,158,11,0.4)';
+      banner.style.color = 'var(--text)';
+      banner.innerHTML = `<strong>⚠️ Paywall detected.</strong> ${escapeHtml(data.paywallReason || 'Article body looks incomplete.')}<br><span style="color:var(--text-dim);">Only ${data.length || 0} chars extracted. Open the article in your browser, copy the full text, and paste it into the box below.</span>`;
+      // Also show a blocking alert per user request
+      alert(`⚠️ Paywall detected\n\n${data.paywallReason || 'Article body looks incomplete.'}\n\nOnly ${data.length || 0} characters were extracted. For best results, copy the full article text from your browser and paste it manually.`);
+    } else {
+      // Success banner — green
+      banner.style.display = 'block';
+      banner.style.background = 'rgba(34,197,94,0.1)';
+      banner.style.border = '1px solid rgba(34,197,94,0.35)';
+      banner.style.color = 'var(--text)';
+      banner.innerHTML = `<strong>✓ Fetched.</strong> ${escapeHtml(data.title || 'Article')} — ${data.length.toLocaleString()} chars${data.byline ? ' · ' + escapeHtml(data.byline) : ''}`;
+    }
+
+    // Pre-fill the source hint by stashing it on the textarea data attribute
+    if (data.suggestedSource) {
+      ta.dataset.suggestedSource = data.suggestedSource;
+    }
+  } catch (err) {
+    banner.style.display = 'block';
+    banner.style.background = 'rgba(239,68,68,0.1)';
+    banner.style.border = '1px solid rgba(239,68,68,0.35)';
+    banner.style.color = 'var(--text)';
+    banner.innerHTML = `<strong>Network error:</strong> ${escapeHtml(err.message)}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origBtnText;
+  }
+}
+
 async function extractConceptsFromArticle() {
   const textVal = document.getElementById('concept-article-input').value.trim();
   if (!pendingDocBase64 && (!textVal || textVal.length < 20)) { showToast('Paste a longer article or upload a file'); return; }
@@ -8317,9 +8396,10 @@ async function extractConceptsFromArticle() {
     body.text = textVal;
   }
 
+  const urlSourceHint = document.getElementById('concept-article-input').dataset.suggestedSource;
   const sourceHint = pendingDocBase64
     ? (pendingDocName || document.getElementById('concept-file-input').files[0]?.name || 'Uploaded document')
-    : (textVal.slice(0, 60).replace(/\n/g, ' ').trim() + (textVal.length > 60 ? '...' : ''));
+    : (urlSourceHint || (textVal.slice(0, 60).replace(/\n/g, ' ').trim() + (textVal.length > 60 ? '...' : '')));
 
   // Save the source-context so the result can support regen + tailor later
   lastExtractContext = pendingDocBase64
