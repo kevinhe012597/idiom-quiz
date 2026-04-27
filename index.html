@@ -1026,6 +1026,27 @@ textarea { resize: vertical; min-height: 80px; }
   outline: none;
   border-color: var(--accent);
 }
+.qa-remove-btn {
+  background: none;
+  border: 1px solid var(--surface2);
+  color: var(--text-dim);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.qa-remove-btn:hover {
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.4);
+  color: var(--red);
+}
 .qa-card-header .tag {
   font-size: 0.75rem;
   padding: 2px 8px;
@@ -6288,6 +6309,7 @@ function renderQuickAddPreview() {
         <span class="tag">${r.category}</span>
         ${r.isDupe ? '<span class="dupe-tag">already in deck</span>' : ''}
         <button class="regen-btn" onclick="quickAddRegenMeaning(${i})" id="qa-regen-meaning-${i}" title="OCR misread the word? Edit it above, then click to regenerate the meaning + example">↻ Regen meaning</button>
+        <button class="qa-remove-btn" onclick="quickAddRemove(${i})" title="Remove this card from the list" aria-label="Remove">×</button>
       </div>
       <textarea rows="2" id="qa-meaning-${i}" onchange="quickAddUpdateMeaning(${i}, this.value)">${escapeHtml(r.meaning)}</textarea>
       <div class="example-row">
@@ -6296,6 +6318,18 @@ function renderQuickAddPreview() {
       </div>
     </div>
   `).join('');
+
+  // If the user removed every card, drop back to step 1 so they can paste/upload again.
+  if (quickAddResults.length === 0) {
+    quickAddReset();
+    showToast('All cards removed');
+  }
+}
+
+function quickAddRemove(index) {
+  if (index < 0 || index >= quickAddResults.length) return;
+  quickAddResults.splice(index, 1);
+  renderQuickAddPreview();
 }
 
 function quickAddUpdatePhrase(index, newPhrase) {
