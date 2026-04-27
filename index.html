@@ -1010,6 +1010,22 @@ textarea { resize: vertical; min-height: 80px; }
   font-weight: 600;
   font-size: 1rem;
 }
+.qa-card-header .qa-phrase-input {
+  flex: 1;
+  font-weight: 600;
+  font-size: 1rem;
+  padding: 6px 10px;
+  border: 1px solid var(--surface2);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  min-width: 0;
+}
+.qa-card-header .qa-phrase-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 .qa-card-header .tag {
   font-size: 0.75rem;
   padding: 2px 8px;
@@ -6156,17 +6172,77 @@ function renderQuickAddPreview() {
   preview.innerHTML = quickAddResults.map((r, i) => `
     <div class="qa-card ${r.isDupe ? 'is-dupe' : ''}" data-qa-index="${i}">
       <div class="qa-card-header">
-        <span class="phrase">${escapeHtml(r.phrase)}</span>
+        <input type="text" class="qa-phrase-input" id="qa-phrase-${i}" value="${escapeHtml(r.phrase)}" oninput="quickAddUpdatePhrase(${i}, this.value)" placeholder="Phrase or word">
         <span class="tag">${r.category}</span>
         ${r.isDupe ? '<span class="dupe-tag">already in deck</span>' : ''}
+        <button class="regen-btn" onclick="quickAddRegenMeaning(${i})" id="qa-regen-meaning-${i}" title="OCR misread the word? Edit it above, then click to regenerate the meaning + example">↻ Regen meaning</button>
       </div>
-      <textarea rows="2" onchange="quickAddUpdateMeaning(${i}, this.value)">${escapeHtml(r.meaning)}</textarea>
+      <textarea rows="2" id="qa-meaning-${i}" onchange="quickAddUpdateMeaning(${i}, this.value)">${escapeHtml(r.meaning)}</textarea>
       <div class="example-row">
         <span class="example-text" id="qa-example-${i}">${escapeHtml(r.example)}</span>
         <button class="regen-btn" onclick="quickAddRegenExample(${i})" id="qa-regen-${i}">↻ New example</button>
       </div>
     </div>
   `).join('');
+}
+
+function quickAddUpdatePhrase(index, newPhrase) {
+  quickAddResults[index].phrase = newPhrase;
+  // Re-check duplicate status with the edited phrase
+  const existingPhrases = new Set(cards.map(c => c.phrase.toLowerCase()));
+  const wasDupe = quickAddResults[index].isDupe;
+  quickAddResults[index].isDupe = existingPhrases.has(newPhrase.trim().toLowerCase());
+  if (wasDupe !== quickAddResults[index].isDupe) {
+    // Dupe state changed → re-render so the badge + counter update
+    renderQuickAddPreview();
+  }
+}
+
+async function quickAddRegenMeaning(index) {
+  const item = quickAddResults[index];
+  // Prefer the live input value in case the onchange hasn't fired yet
+  const phraseEl = document.getElementById(`qa-phrase-${index}`);
+  const phrase = (phraseEl ? phraseEl.value : item.phrase).trim();
+  if (!phrase) { showToast('Phrase is empty'); return; }
+  item.phrase = phrase;
+
+  const btn = document.getElementById(`qa-regen-meaning-${index}`);
+  const meaningEl = document.getElementById(`qa-meaning-${index}`);
+  const exampleEl = document.getElementById(`qa-example-${index}`);
+
+  btn.disabled = true;
+  const origLabel = btn.textContent;
+  btn.textContent = '...';
+  if (meaningEl) meaningEl.value = 'Regenerating...';
+  if (exampleEl) exampleEl.textContent = 'Regenerating...';
+
+  try {
+    const response = await apiFetch('/api/batch-enrich', { phrases: [phrase] });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Regen failed');
+    }
+    const { results } = await response.json();
+    const fresh = (results && results[0]) || null;
+    if (!fresh) throw new Error('Empty response');
+
+    // Update the staged card with the fresh meaning + example + category
+    item.meaning = fresh.meaning || '';
+    item.example = fresh.example || '';
+    item.category = fresh.category || item.category;
+
+    if (meaningEl) meaningEl.value = item.meaning;
+    if (exampleEl) exampleEl.textContent = item.example;
+    // Refresh the category tag in the header (and potentially dupe state)
+    renderQuickAddPreview();
+  } catch (err) {
+    if (meaningEl) meaningEl.value = item.meaning || '';
+    if (exampleEl) exampleEl.textContent = item.example || '';
+    showToast('Error: ' + err.message);
+  } finally {
+    const liveBtn = document.getElementById(`qa-regen-meaning-${index}`);
+    if (liveBtn) { liveBtn.disabled = false; liveBtn.textContent = origLabel; }
+  }
 }
 
 function quickAddUpdateMeaning(index, newMeaning) {
