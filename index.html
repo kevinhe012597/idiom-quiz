@@ -2493,9 +2493,9 @@ textarea { resize: vertical; min-height: 80px; }
       <div class="kb-stat-num" id="kb-week" style="color:var(--blue);">0</div>
       <div class="kb-stat-label">This week</div>
     </div>
-    <div class="kb-stat-card" onclick="openConceptDrillDialog()" style="cursor:pointer;">
-      <div class="kb-stat-num" id="kb-due" style="color:var(--orange);">0</div>
-      <div class="kb-stat-label">Due to drill</div>
+    <div class="kb-stat-card" onclick="conceptBrowseByTime('today')" style="cursor:pointer;">
+      <div class="kb-stat-num" id="kb-today" style="color:var(--orange);">0</div>
+      <div class="kb-stat-label">Added today</div>
     </div>
   </div>
 
@@ -7147,25 +7147,25 @@ function updateModuleSelectCounts() {
 function updateConceptsDashboard() {
   const today = getToday();
   const weekCutoff = Date.now() - 7 * 86400000;
+  const todayCutoff = Date.now() - 1 * 86400000;
 
-  // Total + this week + drill-due counts
+  // Total + this week + added-today counts
   let weekCount = 0;
-  let dueCount = 0;
+  let todayCount = 0;
   concepts.forEach(c => {
     if (c.createdAt) {
       const t = new Date(c.createdAt).getTime();
       if (!isNaN(t) && t >= weekCutoff) weekCount++;
+      if (!isNaN(t) && t >= todayCutoff) todayCount++;
     }
-    // "Due to drill" = scheduled today or earlier, AND not marked Skip
-    if ((c.bucket || '') !== 'skip' && c.nextReview && c.nextReview <= today) dueCount++;
   });
 
   const totalEl = document.getElementById('kb-total');
   const weekEl = document.getElementById('kb-week');
-  const dueEl = document.getElementById('kb-due');
+  const todayEl = document.getElementById('kb-today');
   if (totalEl) totalEl.textContent = concepts.length;
   if (weekEl) weekEl.textContent = weekCount;
-  if (dueEl) dueEl.textContent = dueCount;
+  if (todayEl) todayEl.textContent = todayCount;
 
   // Recently added — sort by createdAt desc, take top 5
   const recentList = document.getElementById('kb-recent-list');
