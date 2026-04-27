@@ -6973,7 +6973,8 @@ function updateConceptsDashboard() {
 // Open browse filtered to a specific tag
 function conceptBrowseByTag(tag) {
   conceptActiveBucket = null;
-  conceptBrowseTagFilter = tag;
+  conceptBrowseIncludeTags = new Set([tag]);
+  conceptBrowseExcludeTags = new Set();
   conceptBrowseTimeFilter = null;
   showScreen('concept-browse');
 }
@@ -6981,14 +6982,16 @@ function conceptBrowseByTag(tag) {
 // Open browse filtered to a specific time window
 function conceptBrowseByTime(timeKey) {
   conceptActiveBucket = null;
-  conceptBrowseTagFilter = null;
+  conceptBrowseIncludeTags.clear();
+  conceptBrowseExcludeTags.clear();
   conceptBrowseTimeFilter = timeKey;
   showScreen('concept-browse');
 }
 
 function conceptBrowseByBucket(bucket) {
   conceptActiveBucket = bucket;
-  conceptBrowseTagFilter = null;
+  conceptBrowseIncludeTags.clear();
+  conceptBrowseExcludeTags.clear();
   conceptBrowseTimeFilter = null;
   conceptSelectMode = false;
   conceptSelectionSet.clear();
@@ -8459,7 +8462,9 @@ async function extractConceptsFromYoutube() {
 
 // ─── Concept Browse ─────────────────────────────────────────────────────
 
-let conceptBrowseTagFilter = null;
+let conceptBrowseTagFilter = null; // legacy — superseded by include/exclude sets
+let conceptBrowseIncludeTags = new Set();
+let conceptBrowseExcludeTags = new Set();
 let conceptBrowseTimeFilter = null; // null | '7d' | '30d' | '90d' | 'today'
 
 // Time-filter options shown as pills above the browse list
@@ -8505,18 +8510,30 @@ function renderConceptBrowse() {
   }
 
   // Render tag filter pills (only tags present in the current bucket)
+  // Three-state click cycle per tag: none → include (purple) → exclude (red, "−" prefix) → none
   const tagsInBucket = [...new Set(bucketFiltered.flatMap(c => c.tags || []))].sort();
   const tagFilterEl = document.getElementById('concept-browse-tag-filters');
   if (tagFilterEl) {
     if (tagsInBucket.length === 0) {
       tagFilterEl.innerHTML = '';
     } else {
-      const allActive = !conceptBrowseTagFilter;
-      tagFilterEl.innerHTML = `<button onclick="toggleConceptBrowseTag(null)" class="concept-tag" style="cursor:pointer; border:none; padding:5px 10px; font-size:0.75rem; ${allActive ? 'background:var(--concept); color:#fff;' : 'opacity:0.5;'}">All</button>` +
-        tagsInBucket.map(t => {
-          const isActive = conceptBrowseTagFilter === t;
-          return `<button onclick="toggleConceptBrowseTag('${t.replace(/'/g, "\\'")}')" class="concept-tag" style="cursor:pointer; border:none; padding:5px 10px; font-size:0.75rem; ${isActive ? 'background:var(--concept); color:#fff;' : 'opacity:0.6;'}">${escapeHtml(t)}</button>`;
-        }).join('');
+      const noneSelected = conceptBrowseIncludeTags.size === 0 && conceptBrowseExcludeTags.size === 0;
+      const allBtn = `<button onclick="clearConceptTagFilters()" class="concept-tag" style="cursor:pointer; border:none; padding:5px 10px; font-size:0.75rem; ${noneSelected ? 'background:var(--concept); color:#fff;' : 'opacity:0.5;'}">All</button>`;
+      const tagBtns = tagsInBucket.map(t => {
+        const safeT = t.replace(/'/g, "\\'");
+        const escT = escapeHtml(t);
+        if (conceptBrowseIncludeTags.has(t)) {
+          return `<button onclick="toggleConceptBrowseTag('${safeT}')" class="concept-tag" title="Click to exclude" style="cursor:pointer; border:none; padding:5px 10px; font-size:0.75rem; background:var(--concept); color:#fff;">${escT}</button>`;
+        }
+        if (conceptBrowseExcludeTags.has(t)) {
+          return `<button onclick="toggleConceptBrowseTag('${safeT}')" class="concept-tag" title="Click to clear" style="cursor:pointer; border:none; padding:5px 10px; font-size:0.75rem; background:rgba(239,68,68,0.85); color:#fff; text-decoration:line-through;">−${escT}</button>`;
+        }
+        return `<button onclick="toggleConceptBrowseTag('${safeT}')" class="concept-tag" title="Click to include" style="cursor:pointer; border:none; padding:5px 10px; font-size:0.75rem; opacity:0.6;">${escT}</button>`;
+      }).join('');
+      const hint = (conceptBrowseIncludeTags.size > 0 || conceptBrowseExcludeTags.size > 0)
+        ? `<span style="font-size:0.65rem; color:var(--text-dim); align-self:center; margin-left:6px;">click again to exclude, again to clear</span>`
+        : '';
+      tagFilterEl.innerHTML = allBtn + tagBtns + hint;
     }
   }
 
@@ -8533,8 +8550,15 @@ function renderConceptBrowse() {
   }
 
   let filtered = bucketFiltered;
-  if (conceptBrowseTagFilter) {
-    filtered = filtered.filter(c => (c.tags || []).includes(conceptBrowseTagFilter));
+  if (conceptBrowseIncludeTags.size > 0 || conceptBrowseExcludeTags.size > 0) {
+    filtered = filtered.filter(c => {
+      const cardTags = c.tags || [];
+      // Every include tag must be present
+      for (const t of conceptBrowseIncludeTags) { if (!cardTags.includes(t)) return false; }
+      // No exclude tag may be present
+      for (const t of conceptBrowseExcludeTags) { if (cardTags.includes(t)) return false; }
+      return true;
+    });
   }
 
   if (conceptBrowseTimeFilter) {
@@ -8842,7 +8866,25 @@ async function batchRefreshSelectedConcepts() {
 }
 
 function toggleConceptBrowseTag(tag) {
-  conceptBrowseTagFilter = (tag === conceptBrowseTagFilter) ? null : tag;
+  if (tag === null || tag === undefined) {
+    clearConceptTagFilters();
+    return;
+  }
+  // Three-state cycle: none → include → exclude → none
+  if (conceptBrowseIncludeTags.has(tag)) {
+    conceptBrowseIncludeTags.delete(tag);
+    conceptBrowseExcludeTags.add(tag);
+  } else if (conceptBrowseExcludeTags.has(tag)) {
+    conceptBrowseExcludeTags.delete(tag);
+  } else {
+    conceptBrowseIncludeTags.add(tag);
+  }
+  renderConceptBrowse();
+}
+
+function clearConceptTagFilters() {
+  conceptBrowseIncludeTags.clear();
+  conceptBrowseExcludeTags.clear();
   renderConceptBrowse();
 }
 
