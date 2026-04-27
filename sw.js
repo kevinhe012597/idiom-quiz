@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lexicon-v115';
+const CACHE_NAME = 'lexicon-v116';
 const STATIC_ASSETS = ['/', '/index.html', '/logo.svg', '/icon-192.svg'];
 
 self.addEventListener('install', (event) => {

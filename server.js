@@ -298,6 +298,11 @@ async function runExtractConcepts(_body) {
   }
 
   const trimmed = text ? (text.length > 24000 ? text.slice(0, 24000) + '\n[truncated]' : text) : '';
+  // parsedText is the canonical text representation we used (or null for raw
+  // PDFs which are sent straight to Anthropic). Returned to the client so
+  // it can cache the parse and regen with a different cardCount without
+  // re-running Gemini or refetching/re-parsing source files.
+  let parsedText = trimmed || null;
 
   const guidanceBlock = guidance
     ? `\n\n## USER'S FOCUS AREA\nThe user specifically cares about: "${guidance}"\nThis MUST shape your extraction:\n- At least half of the extracted items should directly relate to this focus area\n- Go deeper on these topics — extract more granular facts, specific numbers, named entities\n- Still include a few other notable items from the text, but the user's focus area takes clear priority`
@@ -331,11 +336,13 @@ ${existingTagsBlock(existingTags)}${cardCountClause}`;
     if (isDocx(docType)) {
       const docText = await docxToText(docBase64);
       userContent = `Document content:\n${docText}\n\n${docInstruction}`;
+      parsedText = docText; // Cache extracted DOCX text for future regens
     } else {
       userContent = [
         { type: 'document', source: { type: 'base64', media_type: docType || 'application/pdf', data: docBase64 } },
         { type: 'text', text: docInstruction }
       ];
+      // parsedText stays null for raw PDFs — client falls back to docBase64 on regen
     }
   } else {
     userContent = trimmed;
@@ -424,6 +431,7 @@ ${existingTagsBlock(existingTags)}${cardCountClause}`;
             model: usedModel,
             usedGemini,
             elapsedMs: Date.now() - startTs,
+            parsedText, // Lets the client regen with a different cardCount without re-fetching/re-parsing the source
           });
         } catch (e) {
           reject(new Error('Failed to parse extracted concepts: ' + e.message));

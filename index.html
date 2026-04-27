@@ -2708,6 +2708,13 @@ textarea { resize: vertical; min-height: 80px; }
         <label style="font-size:0.75rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Source</label>
         <input type="text" id="cq-batch-source" placeholder="e.g. NYT article, CS 153 lecture, lunch chat" style="width:100%; margin-top:4px; padding:8px 12px; font-size:0.85rem; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); box-sizing:border-box;">
       </div>
+      <!-- Re-extract with a different card count, reusing the cached parse -->
+      <div id="cq-recount-row" style="display:none; margin-bottom:12px; padding:10px 12px; background:rgba(139,92,246,0.06); border:1px dashed var(--surface2); border-radius:10px; align-items:center; gap:8px; flex-wrap:wrap;">
+        <label style="font-size:0.8rem; color:var(--text-dim); white-space:nowrap;">Want a different number of cards?</label>
+        <input type="number" id="cq-recount-input" min="1" max="30" placeholder="e.g. 12" style="width:90px; padding:6px 10px; font-size:0.85rem; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text); box-sizing:border-box;">
+        <button onclick="conceptRegenWithCount()" id="cq-recount-btn" class="btn-secondary" style="width:auto; padding:6px 12px; font-size:0.8rem; white-space:nowrap;">↻ Regenerate</button>
+        <span style="font-size:0.7rem; color:var(--text-dim);">Reuses the parsed source — fast</span>
+      </div>
       <div id="concept-quick-preview"></div>
       <div style="margin-top:12px; padding:12px; border:1px dashed var(--surface2); border-radius:12px;">
         <label style="font-size:0.75rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Ask AI for more</label>
@@ -7841,6 +7848,8 @@ function conceptQuickReset() {
   document.getElementById('concept-quick-step2').style.display = 'none';
   document.getElementById('concept-quick-preview').innerHTML = '';
   document.getElementById('concept-article-progress').style.display = 'none';
+  const recountRow = document.getElementById('cq-recount-row');
+  if (recountRow) recountRow.style.display = 'none';
   // Restore the previously-active panel (default to article)
   const activeTab = (document.getElementById('concept-panel-youtube')?.style.display !== 'none' && document.getElementById('concept-panel-article').style.display === 'none') ? 'youtube' : 'article';
   switchConceptTab(activeTab);
@@ -8138,6 +8147,78 @@ function renderConceptExtractionResults(results, suggestedSource, sourceFallback
   document.getElementById('concept-quick-step2').style.display = 'block';
   document.getElementById('concept-quick-confirm-btn').textContent = `Add Selected`;
   document.getElementById('cq-batch-source').value = articleSource;
+
+  // Show the recount control only when we have a cacheable parsed-text or doc.
+  // Without it, regen would re-fetch / re-run Gemini which defeats the speed promise.
+  const recountRow = document.getElementById('cq-recount-row');
+  if (recountRow) {
+    const canRegenFast = !!(lastExtractContext && (lastExtractContext.text || lastExtractContext.docBase64));
+    recountRow.style.display = canRegenFast ? 'flex' : 'none';
+    document.getElementById('cq-recount-input').value = String(results.length || '');
+  }
+}
+
+// Re-extract with a different cardCount, reusing the cached parsed text.
+// Skips Gemini / source-fetch entirely — only the LLM extraction step runs.
+async function conceptRegenWithCount() {
+  const input = document.getElementById('cq-recount-input');
+  const requested = parseInt(input.value, 10);
+  if (!requested || requested < 1 || requested > 30) {
+    showToast('Enter a number between 1 and 30');
+    return;
+  }
+  if (!lastExtractContext || (!lastExtractContext.text && !lastExtractContext.docBase64)) {
+    showToast('No cached source to regenerate from');
+    return;
+  }
+
+  const btn = document.getElementById('cq-recount-btn');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Regenerating...';
+
+  // Preserve the source label the user typed in case they tweaked it
+  const currentSource = document.getElementById('cq-batch-source').value;
+
+  const body = { cardCount: requested };
+  if (lastExtractContext.text) body.text = lastExtractContext.text;
+  else if (lastExtractContext.docBase64) {
+    body.docBase64 = lastExtractContext.docBase64;
+    body.docType = lastExtractContext.docType;
+  }
+
+  try {
+    const startTs = Date.now();
+    const response = await apiFetch('/api/extract-concepts', body);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Regeneration failed');
+    }
+    const data = await response.json();
+    if (!data.results || data.results.length === 0) {
+      showToast('No concepts returned');
+      return;
+    }
+    // Update cached parse if the server returned a fresher one
+    if (data.parsedText) lastExtractContext = { text: data.parsedText };
+
+    // Re-render in place. Use the suggestedSource if set, but fall back to
+    // whatever the user had typed so they don't lose their edit.
+    const elapsedMs = Date.now() - startTs;
+    renderConceptExtractionResults(
+      data.results,
+      data.suggestedSource || currentSource,
+      currentSource,
+      null,
+      { model: data.model, elapsedMs, usedGemini: false }
+    );
+    showToast(`Regenerated ${data.results.length} card${data.results.length === 1 ? '' : 's'}`);
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    const liveBtn = document.getElementById('cq-recount-btn');
+    if (liveBtn) { liveBtn.disabled = false; liveBtn.textContent = orig; }
+  }
 }
 
 // ─── Background extraction jobs ───────────────────────────────────────────
@@ -8233,10 +8314,16 @@ function reopenExtractionJob(jobId) {
   switchConceptTab(job.kind === 'youtube' ? 'youtube' : 'article');
   const filenameFallback = job.sourceHint || 'Imported';
   const panelId = job.kind === 'youtube' ? 'concept-panel-youtube' : 'concept-panel-article';
-  // Restore the source-context so regen + tailor have something to reference
-  lastExtractContext = job.kind === 'youtube'
-    ? { text: `Source: ${job.sourceHint || ''}` }
-    : { text: job.sourceHint || '' };
+  // Restore the source-context so regen + tailor have something to reference.
+  // Prefer the server-returned parsedText (full transcript / article body) so
+  // regen + tailor + recount don't need to re-fetch or re-run Gemini.
+  if (job.result.parsedText) {
+    lastExtractContext = { text: job.result.parsedText };
+  } else {
+    lastExtractContext = job.kind === 'youtube'
+      ? { text: `Source: ${job.sourceHint || ''}` }
+      : { text: job.sourceHint || '' };
+  }
   renderConceptExtractionResults(
     job.result.results,
     job.result.suggestedSource,
