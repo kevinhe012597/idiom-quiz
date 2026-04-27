@@ -2303,6 +2303,17 @@ textarea { resize: vertical; min-height: 80px; }
     <div class="lookup-section-body" id="body-vibe" style="display:none;">
       <label style="font-size:0.8rem; color:var(--text-dim); margin-bottom:4px; display:block;">The exchange or moment</label>
       <textarea id="vibe-input" rows="4" placeholder='e.g. I said "wow you should start a podcast after that talk!" and they said "well I already have a podcast" — what was that energy?' style="width:100%; padding:10px 14px; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-size:0.9rem; font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
+      <div style="margin-top:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.75rem; color:var(--text-dim); margin-bottom:4px;">
+          <span>Sentiment of the words</span>
+          <span id="vibe-sentiment-label" style="font-weight:600; color:var(--accent);">Either</span>
+        </div>
+        <input type="range" id="vibe-sentiment" min="-2" max="2" step="1" value="0" oninput="updateVibeSentimentLabel(this.value)" style="width:100%; accent-color:var(--accent);">
+        <div style="display:flex; justify-content:space-between; font-size:0.65rem; color:var(--text-dim); margin-top:2px;">
+          <span>Positive</span>
+          <span>Negative</span>
+        </div>
+      </div>
       <button class="btn-primary" id="vibe-btn" onclick="doNameVibe()" style="width:100%; margin-top:10px;">Name the vibe</button>
       <div id="vibe-results" style="display:none;"></div>
     </div>
@@ -5010,6 +5021,9 @@ function showLookup() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  // Reset vibe sentiment slider to neutral
+  const vibeSentEl = document.getElementById('vibe-sentiment');
+  if (vibeSentEl) { vibeSentEl.value = '0'; updateVibeSentimentLabel('0'); }
   ['lookup-result','translate-result','reverse-results','vibe-results','critique-result','synonym-results','polish-result','complete-result','en2zh-result'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
@@ -5419,11 +5433,35 @@ async function doReverseLookup() {
   }
 }
 
+// Maps the 5-position slider value to a sentiment key the server understands.
+const VIBE_SENTIMENT_LABELS = {
+  '-2': 'Strongly positive',
+  '-1': 'Lean positive',
+  '0':  'Either',
+  '1':  'Lean negative',
+  '2':  'Strongly negative',
+};
+const VIBE_SENTIMENT_KEYS = {
+  '-2': 'strongly-positive',
+  '-1': 'lean-positive',
+  '0':  'either',
+  '1':  'lean-negative',
+  '2':  'strongly-negative',
+};
+
+function updateVibeSentimentLabel(val) {
+  const label = document.getElementById('vibe-sentiment-label');
+  if (label) label.textContent = VIBE_SENTIMENT_LABELS[String(val)] || 'Either';
+}
+
 async function doNameVibe() {
   const input = document.getElementById('vibe-input');
   const description = input.value.trim();
   if (!description) { showToast('Paste an exchange or describe the moment first'); return; }
   trackLookupUsage('vibe');
+
+  const sentimentEl = document.getElementById('vibe-sentiment');
+  const sentiment = sentimentEl ? VIBE_SENTIMENT_KEYS[sentimentEl.value] || 'either' : 'either';
 
   const btn = document.getElementById('vibe-btn');
   btn.disabled = true;
@@ -5431,7 +5469,7 @@ async function doNameVibe() {
   btn.textContent = '...';
 
   try {
-    const response = await apiFetch('/api/name-vibe', { description });
+    const response = await apiFetch('/api/name-vibe', { description, sentiment });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
       throw new Error(err.error || 'Lookup failed');

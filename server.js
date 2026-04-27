@@ -2193,12 +2193,29 @@ Only output valid JSON, nothing else.`
     req.on('end', async () => {
       try {
         const _body = JSON.parse(body);
-        const { description } = _body;
+        const { description, sentiment } = _body;
         if (!description) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing description' }));
           return;
         }
+
+        // Sentiment bias — slider value mapped to a phrase the model can act on
+        const sentimentClause = (() => {
+          switch (sentiment) {
+            case 'strongly-positive':
+              return '\n\nSENTIMENT FILTER: Return ONLY warm, generous, or admiring words (e.g. earnest, magnanimous, gracious, candid, self-effacing). Skip anything ambivalent or critical.';
+            case 'lean-positive':
+              return '\n\nSENTIMENT FILTER: Lean toward positive / sympathetic words. About 4 of 5 should be warm or neutral-favorable. One mildly critical word is fine if it genuinely fits.';
+            case 'lean-negative':
+              return '\n\nSENTIMENT FILTER: Lean toward critical / unflattering words. About 4 of 5 should be unflattering, but include one that\'s neutral or sympathetic if it fits.';
+            case 'strongly-negative':
+              return '\n\nSENTIMENT FILTER: Return ONLY unflattering, critical, or pointed words (e.g. defensive, dismissive, snide, sycophantic, mealy-mouthed). Skip anything neutral or sympathetic.';
+            case 'either':
+            default:
+              return '\n\nSENTIMENT FILTER: Mix freely — include both flattering and unflattering interpretations of the moment if the wording supports it.';
+          }
+        })();
 
         const payload = JSON.stringify({
           model: pickModel(_body),
@@ -2213,7 +2230,7 @@ Examples of the kind of words you'd return:
 - passive-aggressive, cutting, snide, sardonic, biting
 - enthusiastic, gushing, effusive, fawning, sycophantic
 - hedging, equivocating, mealy-mouthed, weaselly
-- magnanimous, gracious, generous-spirited
+- magnanimous, gracious, generous-spirited${sentimentClause}
 
 For each, provide the phrase, its category (word, phrase, or idiom), a concise meaning that explains the tone/dynamic, and a natural example sentence showing the word used to describe how someone is acting.
 
