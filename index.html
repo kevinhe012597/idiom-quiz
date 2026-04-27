@@ -2107,6 +2107,36 @@ textarea { resize: vertical; min-height: 80px; }
     </div>
   </div>
 
+  <!-- Card View Screen (read-only) -->
+  <div id="card-view" class="screen">
+    <div class="header">
+      <button class="back" onclick="exitCardView()">&larr;</button>
+      <h2>Card</h2>
+      <button onclick="editCardFromView()" style="background:none; border:none; color:var(--accent); font-size:0.95rem; font-weight:600; cursor:pointer;">Edit</button>
+    </div>
+    <div class="concept-card" style="padding:20px;">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div id="cv-card-phrase" style="font-size:1.6rem; font-weight:700; color:var(--text); line-height:1.25;"></div>
+        <button id="cv-card-speak" class="btn-speak btn-speak-inline" onclick="speakCardViewPhrase(this)" title="Hear pronunciation">&#128264;</button>
+      </div>
+      <div id="cv-card-badges" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:6px;"></div>
+      <div id="cv-card-meaning-wrap" style="margin-top:18px;">
+        <div style="font-size:0.7rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Meaning</div>
+        <div id="cv-card-meaning" style="margin-top:6px; font-size:1rem; line-height:1.6; color:var(--text);"></div>
+      </div>
+      <div id="cv-card-example-wrap" style="display:none; margin-top:16px;">
+        <div style="font-size:0.7rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Example</div>
+        <div id="cv-card-example" style="margin-top:6px; padding:10px 12px; background:var(--surface2); border-radius:10px; font-size:0.95rem; line-height:1.55; color:var(--text); font-style:italic;"></div>
+      </div>
+      <div id="cv-card-tags" style="margin-top:14px; display:flex; flex-wrap:wrap; gap:6px;"></div>
+      <div id="cv-card-info" style="margin-top:18px; padding-top:14px; border-top:1px solid var(--surface2); font-size:0.8rem; color:var(--text-dim); line-height:1.55;"></div>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:14px;">
+      <button class="btn-secondary" onclick="exitCardView()" style="flex:1;">Back</button>
+      <button class="btn-primary" onclick="editCardFromView()" style="flex:1;">Edit</button>
+    </div>
+  </div>
+
 <!-- Look Up Screen -->
 <div id="lookup" class="screen">
   <div class="header">
@@ -2454,6 +2484,7 @@ textarea { resize: vertical; min-height: 80px; }
       <div class="lookup-result-main">
         <div class="concept-card" id="concept-lookup-card">
           <div class="concept-card-title" id="cl-title"></div>
+          <div id="cl-model-badge" style="display:none; margin-top:4px; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;"></div>
           <div id="cl-body" style="margin-top:8px; font-size:0.9rem; line-height:1.6;"></div>
         </div>
         <div style="margin-top:12px; padding:12px; border:1px dashed var(--surface2); border-radius:12px;">
@@ -4637,7 +4668,7 @@ function renderBrowseList() {
       `<span style="font-size:0.65rem; padding:1px 7px; border-radius:8px; background:rgba(139,92,246,0.12); color:var(--concept); font-weight:600;">${escapeHtml(t)}</span>`
     ).join(' ');
     return `
-      <div class="card-item" onclick="editCard('${card.id}')">
+      <div class="card-item" onclick="viewCard('${card.id}')">
         <div>
           <div class="card-phrase">${escapeHtml(card.phrase)}</div>
           <div class="card-meta">${card.category} · ${escapeHtml(card.meaning.slice(0, 50))}${card.meaning.length > 50 ? '...' : ''}</div>
@@ -4654,6 +4685,7 @@ function renderBrowseList() {
 
 let editingCardId = null;
 let editingFromReview = false;
+let editingFromView = false;
 
 function showAddForm() {
   editingCardId = null;
@@ -4664,6 +4696,91 @@ function showAddForm() {
   document.getElementById('quick-add-section').style.display = 'block';
   quickAddReset();
   showScreen('add-edit');
+}
+
+// ─── Card View (read-only) ───────────────────────────────────────────
+let viewingCardId = null;
+
+function viewCard(id) {
+  const card = cards.find(c => c.id === id);
+  if (!card) return;
+  viewingCardId = id;
+
+  document.getElementById('cv-card-phrase').textContent = card.phrase;
+
+  // Badges: category + bucket
+  const badges = [];
+  if (card.category) {
+    badges.push(`<span style="font-size:0.7rem; padding:3px 9px; border-radius:10px; background:var(--surface2); color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;">${escapeHtml(card.category)}</span>`);
+  }
+  if (card.bucket) {
+    badges.push(`<span style="font-size:0.7rem; padding:3px 9px; border-radius:10px; background:rgba(99,102,241,0.15); color:var(--accent); font-weight:600;">${escapeHtml(card.bucket)}</span>`);
+  }
+  const today = getToday();
+  let statusText, statusColor;
+  if (card.interval >= 21) { statusText = 'Mastered'; statusColor = 'var(--green)'; }
+  else if (card.nextReview <= today) { statusText = 'Due'; statusColor = 'var(--orange)'; }
+  else { statusText = 'In ' + formatInterval(Math.max(1, Math.ceil((new Date(card.nextReview) - new Date(today)) / 86400000))); statusColor = 'var(--text-dim)'; }
+  badges.push(`<span style="font-size:0.7rem; padding:3px 9px; border-radius:10px; background:rgba(255,255,255,0.04); color:${statusColor}; font-weight:600;">${statusText}</span>`);
+  document.getElementById('cv-card-badges').innerHTML = badges.join('');
+
+  document.getElementById('cv-card-meaning').textContent = card.meaning || '';
+
+  const exWrap = document.getElementById('cv-card-example-wrap');
+  if (card.example && card.example.trim()) {
+    document.getElementById('cv-card-example').textContent = card.example;
+    exWrap.style.display = 'block';
+  } else {
+    exWrap.style.display = 'none';
+  }
+
+  const tagsEl = document.getElementById('cv-card-tags');
+  const tags = card.tags || [];
+  tagsEl.innerHTML = tags.map(t =>
+    `<span style="font-size:0.72rem; padding:3px 10px; border-radius:10px; background:rgba(139,92,246,0.12); color:var(--concept); font-weight:600;">${escapeHtml(t)}</span>`
+  ).join('');
+
+  // Card info: added date + source, original query, rating history
+  const infoParts = [];
+  if (card.createdAt) {
+    const d = new Date(card.createdAt);
+    const formatted = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    infoParts.push(`<div>Added <strong>${formatted}</strong> via ${escapeHtml(card.source || 'Unknown')}</div>`);
+  }
+  if (card.sourceContext) {
+    const ctx = card.sourceContext.length > 140 ? card.sourceContext.slice(0, 140) + '…' : card.sourceContext;
+    infoParts.push(`<div style="margin-top:6px; padding:6px 10px; background:var(--surface2); border-radius:8px; color:var(--text-dim); font-style:italic;">Original query: &ldquo;${escapeHtml(ctx)}&rdquo;</div>`);
+  }
+  if (card.ratingHistory && card.ratingHistory.length > 0) {
+    const counts = { nope: 0, kinda: 0, nailed: 0, skip: 0 };
+    card.ratingHistory.forEach(r => { if (counts[r.bucket] !== undefined) counts[r.bucket]++; });
+    const total = card.ratingHistory.length;
+    const parts = [];
+    if (counts.nope) parts.push(`<span style="color:var(--red);">${counts.nope} Nope</span>`);
+    if (counts.kinda) parts.push(`<span style="color:var(--orange);">${counts.kinda} Kinda</span>`);
+    if (counts.nailed) parts.push(`<span style="color:var(--green);">${counts.nailed} Nailed</span>`);
+    if (counts.skip) parts.push(`<span style="color:var(--text-dim);">${counts.skip} Skipped</span>`);
+    infoParts.push(`<div style="margin-top:6px;">Reviewed ${total} time${total !== 1 ? 's' : ''}: ${parts.join(' &middot; ')}</div>`);
+  }
+  document.getElementById('cv-card-info').innerHTML = infoParts.join('') || '<div style="color:var(--text-dim);">No history yet</div>';
+
+  showScreen('card-view');
+}
+
+function exitCardView() {
+  viewingCardId = null;
+  showScreen('browse');
+}
+
+function editCardFromView() {
+  if (!viewingCardId) return;
+  editCard(viewingCardId);
+  editingFromView = true;
+}
+
+function speakCardViewPhrase(btn) {
+  const phrase = document.getElementById('cv-card-phrase').textContent;
+  if (phrase) speakText(btn, phrase);
 }
 
 function editCard(id) {
@@ -4785,8 +4902,13 @@ function saveCard() {
 
   if (editingFromReview) {
     editingFromReview = false;
+    editingFromView = false;
     showScreen('review');
     showCurrentCard();
+  } else if (editingFromView && editingCardId) {
+    const id = editingCardId;
+    editingFromView = false;
+    viewCard(id); // re-render the view with updated content
   } else {
     showScreen('browse');
   }
@@ -4799,6 +4921,8 @@ function deleteCard() {
   cards = cards.filter(c => c.id !== editingCardId);
   saveCards(cards);
   editingCardId = null;
+  viewingCardId = null;
+  editingFromView = false;
   showToast('Card deleted');
   showScreen('browse');
 }
@@ -4806,8 +4930,13 @@ function deleteCard() {
 function cancelEdit() {
   if (editingFromReview) {
     editingFromReview = false;
+    editingFromView = false;
     showScreen('review');
     showCurrentCard();
+  } else if (editingFromView && editingCardId) {
+    const id = editingCardId;
+    editingFromView = false;
+    viewCard(id);
   } else {
     showScreen(editingCardId ? 'browse' : 'dashboard');
   }
@@ -6857,6 +6986,18 @@ function conceptBrowseByBucket(bucket) {
 
 // ─── Concept Lookup ─────────────────────────────────────────────────────
 
+function setLookupModelBadge(model) {
+  const el = document.getElementById('cl-model-badge');
+  if (!el) return;
+  if (model) {
+    el.textContent = `via ${model}`;
+    el.style.display = 'block';
+  } else {
+    el.textContent = '';
+    el.style.display = 'none';
+  }
+}
+
 async function doConceptLookup() {
   const input = document.getElementById('concept-lookup-input');
   const query = input.value.trim();
@@ -6873,6 +7014,7 @@ async function doConceptLookup() {
     conceptLookupData = result;
 
     document.getElementById('cl-title').textContent = result.title || query;
+    setLookupModelBadge(result._model);
 
     // Render bullet points (new format) or fall back to summary+details (old format)
     const points = result.points || [];
@@ -6970,6 +7112,7 @@ async function tailorConceptLookup(appendMode) {
     conceptLookupData = result;
 
     document.getElementById('cl-title').textContent = result.title || '';
+    setLookupModelBadge(result._model);
     const points = result.points || [];
     if (points.length > 0) {
       document.getElementById('cl-body').innerHTML = '<ul style="margin:0; padding-left:18px;">' +

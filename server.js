@@ -161,6 +161,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const FIREWORKS_API_KEY = process.env.FIREWORKS_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'idiom-quiz.db');
 
 // ─── Model routing ────────────────────────────────────────────────────────
@@ -198,6 +199,61 @@ function pickAnthropicModel(body) {
   const m = body && body.model;
   if (m && ANTHROPIC_MODELS.has(m)) return m;
   return ANTHROPIC_DEFAULT_FAST;
+}
+
+// ─── Text-to-speech request builders ──────────────────────────────────────
+// ElevenLabs is the primary provider — better pronunciation of idioms,
+// loan words, names. Voice "Rachel" (default) is clear and natural.
+// Free tier = 10K chars/month, Starter ($5) = 30K, Creator ($22) = 100K.
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM'; // Rachel
+const ELEVENLABS_MODEL_ID = process.env.ELEVENLABS_MODEL_ID || 'eleven_turbo_v2_5'; // fast + good quality
+
+function buildElevenLabsTTSRequest(text) {
+  const payload = JSON.stringify({
+    text,
+    model_id: ELEVENLABS_MODEL_ID,
+    voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true },
+    output_format: 'mp3_44100_128',
+  });
+  return {
+    providerName: 'ElevenLabs',
+    payload,
+    requestOptions: {
+      hostname: 'api.elevenlabs.io',
+      path: `/v1/text-to-speech/${ELEVENLABS_VOICE_ID}?output_format=mp3_44100_128`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'xi-api-key': ELEVENLABS_API_KEY,
+        'Accept': 'audio/mpeg',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    },
+  };
+}
+
+function buildOpenAITTSRequest(text) {
+  const payload = JSON.stringify({
+    model: 'tts-1',
+    input: text,
+    voice: 'nova',
+    response_format: 'mp3',
+    speed: 0.7,
+  });
+  return {
+    providerName: 'OpenAI',
+    payload,
+    requestOptions: {
+      hostname: 'api.openai.com',
+      path: '/v1/audio/speech',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    },
+  };
 }
 
 // ─── Background extraction job queue ──────────────────────────────────────
@@ -835,6 +891,7 @@ ${existingTagsBlock(existingTags)}`;
               content = content.trim();
               const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
               const result = JSON.parse(jsonStr);
+              result._model = lookupModel;
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify(result));
             } catch (e) {
@@ -2535,31 +2592,45 @@ Return JSON:
           return;
         }
 
+        // Provider selection: ElevenLabs is the primary TTS provider for
+        // higher-quality pronunciation (idioms, loan words, names, etc.).
+        // OpenAI tts-1 is the fallback when ELEVENLABS_API_KEY isn't set
+        // or when the ElevenLabs request fails (e.g. quota exceeded).
+        const useElevenLabs = !!ELEVENLABS_API_KEY;
+        const opts = useElevenLabs
+          ? buildElevenLabsTTSRequest(text)
+          : buildOpenAITTSRequest(text);
+
         const https = require('https');
-        const payload = JSON.stringify({
-          model: 'tts-1',
-          input: text,
-          voice: 'nova',
-          response_format: 'mp3',
-          speed: 0.7
-        });
-
-        const options = {
-          hostname: 'api.openai.com',
-          path: '/v1/audio/speech',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'Content-Length': Buffer.byteLength(payload),
-          },
-        };
-
-        const apiReq = compatHttps.request(options, (apiRes) => {
+        const apiReq = https.request(opts.requestOptions, (apiRes) => {
           if (apiRes.statusCode !== 200) {
             let errData = '';
             apiRes.on('data', chunk => { errData += chunk; });
             apiRes.on('end', () => {
+              console.error(`TTS ${opts.providerName} error ${apiRes.statusCode}:`, errData.slice(0, 200));
+              // Fallback to OpenAI if ElevenLabs failed and OpenAI key is available
+              if (useElevenLabs && OPENAI_API_KEY) {
+                console.warn('Falling back to OpenAI TTS');
+                const fallback = buildOpenAITTSRequest(text);
+                const fbReq = https.request(fallback.requestOptions, (fbRes) => {
+                  if (fbRes.statusCode !== 200) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: `TTS API error: ${fbRes.statusCode}` }));
+                    return;
+                  }
+                  const chunks = [];
+                  fbRes.on('data', c => chunks.push(c));
+                  fbRes.on('end', () => {
+                    const buffer = Buffer.concat(chunks);
+                    res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': buffer.length });
+                    res.end(buffer);
+                  });
+                });
+                fbReq.on('error', (e) => { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); });
+                fbReq.write(fallback.payload);
+                fbReq.end();
+                return;
+              }
               res.writeHead(500, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: `TTS API error: ${apiRes.statusCode}` }));
             });
@@ -2582,7 +2653,7 @@ Return JSON:
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
         });
-        apiReq.write(payload);
+        apiReq.write(opts.payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
