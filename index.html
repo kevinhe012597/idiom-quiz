@@ -2731,44 +2731,6 @@ textarea { resize: vertical; min-height: 80px; }
     <button id="concept-batch-refresh-btn" onclick="batchRefreshSelectedConcepts()" class="btn-primary concept-btn" style="width:auto; padding:7px 14px; font-size:0.8rem; white-space:nowrap;">↻ Refresh selected</button>
   </div>
 
-  <!-- Manage tags modal -->
-  <div id="concept-manage-tags-modal" class="concept-merge-modal" style="display:none;">
-    <div class="concept-merge-card" style="max-width:640px;">
-      <div class="concept-merge-header">
-        <h3 style="margin:0; color:var(--concept); font-size:1.1rem;">⚙ Manage tags</h3>
-        <button onclick="closeManageTagsModal()" style="background:none; border:none; font-size:1.5rem; line-height:1; cursor:pointer; color:var(--text-dim);">×</button>
-      </div>
-      <p style="font-size:0.8rem; color:var(--text-dim); margin:4px 0 12px 0;">Deleting a tag removes it from every card that has it. The card itself is kept.</p>
-      <div id="concept-manage-tags-list" style="display:flex; flex-direction:column; gap:6px;"></div>
-    </div>
-  </div>
-
-  <!-- Merge preview modal -->
-  <div id="concept-merge-modal" class="concept-merge-modal" style="display:none;">
-    <div class="concept-merge-card">
-      <div class="concept-merge-header">
-        <h3 style="margin:0; color:var(--concept); font-size:1.1rem;">🔀 Merge preview</h3>
-        <button onclick="cancelConceptMerge()" style="background:none; border:none; font-size:1.5rem; line-height:1; cursor:pointer; color:var(--text-dim);">×</button>
-      </div>
-      <p style="font-size:0.8rem; color:var(--text-dim); margin:4px 0 12px 0;">Saving will create this merged card and <strong>delete</strong> the original <span id="concept-merge-count">2</span> cards. You can edit before saving.</p>
-      <div class="form-group" style="margin-bottom:10px;">
-        <label style="font-size:0.75rem; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Title</label>
-        <textarea id="concept-merge-title" rows="2" style="width:100%; margin-top:4px; padding:8px 12px; font-size:0.95rem; font-weight:700; line-height:1.35; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
-      </div>
-      <div class="form-group" style="margin-bottom:10px;">
-        <label style="font-size:0.75rem; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Bullets</label>
-        <textarea id="concept-merge-points" rows="10" style="width:100%; margin-top:4px; padding:8px 10px; font-size:0.85rem; line-height:1.6; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
-      </div>
-      <div class="form-group" style="margin-bottom:14px;">
-        <label style="font-size:0.75rem; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Tags</label>
-        <div id="concept-merge-tags-placeholder"></div>
-      </div>
-      <div style="display:flex; gap:8px; justify-content:flex-end;">
-        <button class="btn-secondary" onclick="cancelConceptMerge()" style="width:auto; padding:8px 16px;">Cancel</button>
-        <button id="concept-merge-save-btn" class="btn-primary concept-btn" onclick="saveConceptMerge()" style="width:auto; padding:8px 18px;">Save merged card</button>
-      </div>
-    </div>
-  </div>
   <div id="concept-browse-list"></div>
 </div>
 
@@ -9637,5 +9599,44 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 </script>
+
+<!-- Modals — kept at root level (outside any transformed parent) so position:fixed
+     resolves against the viewport, not the wide concept-browse screen. -->
+<div id="concept-manage-tags-modal" class="concept-merge-modal" style="display:none;">
+  <div class="concept-merge-card" style="max-width:640px;">
+    <div class="concept-merge-header">
+      <h3 style="margin:0; color:var(--concept); font-size:1.1rem;">⚙ Manage tags</h3>
+      <button onclick="closeManageTagsModal()" style="background:none; border:none; font-size:1.5rem; line-height:1; cursor:pointer; color:var(--text-dim);">×</button>
+    </div>
+    <p style="font-size:0.8rem; color:var(--text-dim); margin:4px 0 12px 0;">Deleting a tag removes it from every card that has it. The card itself is kept.</p>
+    <div id="concept-manage-tags-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+  </div>
+</div>
+
+<div id="concept-merge-modal" class="concept-merge-modal" style="display:none;">
+  <div class="concept-merge-card">
+    <div class="concept-merge-header">
+      <h3 style="margin:0; color:var(--concept); font-size:1.1rem;">🔀 Merge preview</h3>
+      <button onclick="cancelConceptMerge()" style="background:none; border:none; font-size:1.5rem; line-height:1; cursor:pointer; color:var(--text-dim);">×</button>
+    </div>
+    <p style="font-size:0.8rem; color:var(--text-dim); margin:4px 0 12px 0;">Saving will create this merged card and <strong>delete</strong> the original <span id="concept-merge-count">2</span> cards. You can edit before saving.</p>
+    <div class="form-group" style="margin-bottom:10px;">
+      <label style="font-size:0.75rem; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Title</label>
+      <textarea id="concept-merge-title" rows="2" style="width:100%; margin-top:4px; padding:8px 12px; font-size:0.95rem; font-weight:700; line-height:1.35; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:10px;">
+      <label style="font-size:0.75rem; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Bullets</label>
+      <textarea id="concept-merge-points" rows="10" style="width:100%; margin-top:4px; padding:8px 10px; font-size:0.85rem; line-height:1.6; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:14px;">
+      <label style="font-size:0.75rem; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Tags</label>
+      <div id="concept-merge-tags-placeholder"></div>
+    </div>
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button class="btn-secondary" onclick="cancelConceptMerge()" style="width:auto; padding:8px 16px;">Cancel</button>
+      <button id="concept-merge-save-btn" class="btn-primary concept-btn" onclick="saveConceptMerge()" style="width:auto; padding:8px 18px;">Save merged card</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
