@@ -965,7 +965,8 @@ ${existingTagsBlock(existingTags)}`;
         // Use raw https.request — this endpoint speaks Anthropic format natively
         // and parses Claude's content blocks directly. With web search, the response
         // can contain multiple blocks (text + server_tool_use + web_search_tool_result + text).
-        // We take the LAST text block as the final answer.
+        // We concatenate ALL text blocks because the model often splits the answer
+        // around search calls — taking only the last block strips the opening.
         const apiReq = https.request(options, (apiRes) => {
           let data = '';
           apiRes.on('data', chunk => { data += chunk; });
@@ -983,12 +984,13 @@ ${existingTagsBlock(existingTags)}`;
             }
             try {
               const parsed = JSON.parse(data);
-              // Find the last text block — with web search, there may be multiple
-              let textContent = '';
+              // Concatenate all text blocks. Joins with a space so adjacent blocks
+              // don't smush together if the model wrote separate sentences.
+              const textParts = [];
               for (const block of (parsed.content || [])) {
-                if (block.type === 'text' && block.text) textContent = block.text;
+                if (block.type === 'text' && block.text) textParts.push(block.text.trim());
               }
-              const answer = textContent.trim();
+              const answer = textParts.filter(Boolean).join(' ').trim();
               if (!answer) throw new Error('Empty response');
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ answer }));
