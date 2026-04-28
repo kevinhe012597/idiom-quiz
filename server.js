@@ -804,17 +804,24 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        // Concept lookup needs web search. Two paths:
-        //   - User picked an Anthropic model → Anthropic Messages API + web_search_20250305 + tool_use for structured JSON
-        //   - User picked an OpenAI model (or non-web-search model) → OpenAI Responses API + web_search_preview
-        // If the user picked a Fireworks model (DeepSeek/Llama/Qwen), web search isn't available
-        // through that provider, so we fall back to OpenAI default — and surface a note so it isn't a silent surprise.
+        // Concept lookup honors the user's model choice across all three providers:
+        //   - Anthropic   → Messages API + native web_search_20250305 + tool_use
+        //   - OpenAI      → Responses API + web_search_preview
+        //   - Fireworks   → Chat Completions, NO web search (Fireworks doesn't expose one).
+        //                   Surface a note so the user knows answers aren't web-fresh.
         const userPickedAnthropic = !!(_body.model && ANTHROPIC_MODELS.has(_body.model));
         const userPickedOpenAI = !!(_body.model && OPENAI_MODELS.has(_body.model));
-        const lookupModel = userPickedAnthropic ? _body.model : (userPickedOpenAI ? _body.model : DEFAULT_MODEL);
-        // Note shown to the user when their selected model couldn't honor the lookup.
-        const noteForUser = (!userPickedAnthropic && !userPickedOpenAI && _body.model)
-          ? `Lookup needs web search, which ${_body.model} doesn't expose. Used ${DEFAULT_MODEL} instead.`
+        const userPickedFireworks = !!(_body.model && FIREWORKS_MODELS.has(_body.model));
+        const lookupModel = userPickedAnthropic
+          ? _body.model
+          : userPickedOpenAI
+            ? _body.model
+            : userPickedFireworks
+              ? _body.model
+              : DEFAULT_MODEL;
+        // Note shown to the user when their selected model can't reach the web.
+        const noteForUser = userPickedFireworks
+          ? `${_body.model} can't search the web — answer is from training data only (may miss recent events).`
           : null;
 
         // APPEND MODE: user wants to ADD bullets without dropping existing ones.
@@ -866,6 +873,56 @@ ${skillsBlock([
 ${existingTagsBlock(existingTags)}`;
 
         const https = require('https');
+
+        // Chat-completions lookup (no web search). Used for Fireworks models
+        // since Fireworks doesn't expose a web_search tool. Returns answers
+        // from the model's training data only.
+        function runChatCompletionsLookup(model, fallbackNote) {
+          const sysPrompt = `${instructions}\n\nIMPORTANT: You do NOT have web search. Answer using your training-data knowledge only. If asked about something time-sensitive (recent funding, latest news, current price), say so honestly in the bullets and lean on what you do know about the entity.`;
+          const payload = JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: sysPrompt },
+              { role: 'user', content: `Look up: ${query}` }
+            ],
+            temperature: 0.5,
+            max_tokens: 2000,
+          });
+          const options = buildRequestOptions(payload);
+          const apiReq = compatHttps.request(options, (apiRes) => {
+            let data = '';
+            apiRes.on('data', chunk => { data += chunk; });
+            apiRes.on('end', () => {
+              if (apiRes.statusCode !== 200) {
+                console.error('concept-lookup Fireworks/chat error:', apiRes.statusCode, data.slice(0, 200));
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: `${model} API error (${apiRes.statusCode})` }));
+                return;
+              }
+              try {
+                const parsed = JSON.parse(data);
+                const content = (parsed.choices?.[0]?.message?.content || '').trim();
+                const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+                const result = JSON.parse(jsonStr);
+                result._model = model;
+                if (fallbackNote) result._fallbackNote = fallbackNote;
+                else if (noteForUser) result._fallbackNote = noteForUser;
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(result));
+              } catch (e) {
+                console.error('concept-lookup Fireworks parse error:', e.message, data.slice(0, 300));
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: `Failed to parse ${model} response` }));
+              }
+            });
+          });
+          apiReq.on('error', (err) => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+          apiReq.write(options._body || payload);
+          apiReq.end();
+        }
 
         // OpenAI lookup runner — used both as the primary path when the user
         // picked an OpenAI model AND as a fallback when Anthropic rate-limits.
@@ -1017,7 +1074,13 @@ ${existingTagsBlock(existingTags)}`;
           return;
         }
 
-        // Path B: OpenAI primary path (when user picked an OpenAI model)
+        // Path B: Fireworks (DeepSeek/Llama/Qwen) — chat completions, no web search
+        if (userPickedFireworks) {
+          runChatCompletionsLookup(lookupModel, null);
+          return;
+        }
+
+        // Path C: OpenAI primary path (when user picked an OpenAI model)
         runOpenAILookup(lookupModel, null);
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
