@@ -450,7 +450,7 @@ ${existingTagsBlock(existingTags)}${cardCountClause}`;
       });
     });
     apiReq.on('error', reject);
-    apiReq.write(payload);
+    apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
     apiReq.end();
   });
 }
@@ -632,7 +632,7 @@ function chatCompletion(model, messages, opts = {}) {
       });
     });
     apiReq.on('error', reject);
-    apiReq.write(payload);
+    apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
     apiReq.end();
   });
 }
@@ -1012,7 +1012,7 @@ ${existingTagsBlock(existingTags)}`;
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: err.message }));
           });
-          apiReq.write(payload);
+          apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
           apiReq.end();
         }
 
@@ -1227,7 +1227,7 @@ ${existingTagsBlock(existingTags)}`;
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
         });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1311,7 +1311,7 @@ ${existingTagsBlock(existingTags)}`
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
         });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1694,7 +1694,7 @@ ${existingTagsBlock(existingTags)}`;
           });
         });
         apiReq.on('error', (err) => { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: err.message })); });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1837,7 +1837,7 @@ CRITICAL: Your FINAL message must contain ONLY a valid JSON object. No prose, no
           });
         });
         apiReq.on('error', (err) => { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: err.message })); });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1972,7 +1972,7 @@ ${existingTagsBlock(existingTags)}`;
           });
         });
         apiReq.on('error', (err) => { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: err.message })); });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2255,7 +2255,7 @@ Please redefine this card according to the user's feedback.`
             });
           });
           apiReq.on('error', reject);
-          apiReq.write(payload);
+          apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
           apiReq.end();
         });
 
@@ -2350,7 +2350,7 @@ Only output valid JSON, nothing else.`
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
         });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         console.error('Image extract error:', err.message);
@@ -2520,7 +2520,7 @@ Return ONLY valid JSON array with this exact shape: [{"phrase":"...","category":
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
         });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2588,7 +2588,7 @@ Return ONLY valid JSON array with this exact shape: [{"phrase":"...","category":
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
         });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2673,7 +2673,7 @@ Return JSON: {"note":"optional note","groups":[{"label":"Group Name","items":[{"
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
         });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2756,7 +2756,7 @@ Return JSON:
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
         });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2828,7 +2828,7 @@ Return JSON:
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
         });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2908,7 +2908,7 @@ Return JSON:
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
         });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2991,7 +2991,7 @@ Be concise but helpful. If the word is correct, acknowledge it and still offer a
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
         });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -3074,7 +3074,7 @@ Return JSON:
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
         });
-        apiReq.write(payload);
+        apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
         apiReq.end();
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -3790,7 +3790,7 @@ Only output valid JSON, nothing else.`
     });
 
     apiReq.on('error', reject);
-    apiReq.write(payload);
+    apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
     apiReq.end();
   });
 }
@@ -3880,7 +3880,7 @@ Only output valid JSON, nothing else.`
     });
 
     apiReq.on('error', reject);
-    apiReq.write(payload);
+    apiReq.write((typeof options !== 'undefined' && options && options._body) || payload);
     apiReq.end();
   });
 }
