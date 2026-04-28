@@ -2133,8 +2133,22 @@ textarea { resize: vertical; min-height: 80px; }
           </div>
           <p id="quick-add-status" style="color:var(--text-dim); font-size:0.85rem; margin-top:6px;">Processing...</p>
         </div>
-        <button class="btn-primary" id="quick-add-btn" style="margin-top:8px;" onclick="quickAddGenerate()">Generate</button>
+        <div style="display:flex; gap:6px; margin-top:8px;">
+          <button class="btn-primary" id="quick-add-btn" style="flex:1;" onclick="quickAddTriage()">Triage &rarr;</button>
+          <button class="btn-secondary" onclick="quickAddGenerate()" style="width:auto; padding:0 14px; font-size:0.85rem;" title="Skip triage — treat every line as a vocab word">Quick Generate</button>
+        </div>
       </div>
+      <!-- Triage step: one row per line, each row picks a lookup tool -->
+      <div id="quick-add-triage" style="display:none;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+          <span style="font-size:0.85rem; color:var(--text-dim);">For each phrase, pick what you want the AI to do:</span>
+          <div style="flex:1;"></div>
+          <button class="btn-secondary" onclick="quickAddBackToStep1()" style="width:auto; padding:6px 12px; font-size:0.8rem;">← Back</button>
+          <button class="btn-primary" onclick="quickAddRunAll()" id="qa-triage-run-all" style="width:auto; padding:6px 14px; font-size:0.85rem;">Run all</button>
+        </div>
+        <div id="qa-triage-rows"></div>
+      </div>
+
       <div id="quick-add-step2" style="display:none;">
         <div id="quick-add-preview"></div>
         <div style="display:flex; gap:8px; margin-top:12px;">
@@ -6326,6 +6340,295 @@ async function extractFromImage() {
 
 let quickAddResults = []; // staged results before confirm
 
+// ─── Quick Add Triage ─────────────────────────────────────────────────────
+// Per-line tool routing: each pasted line can be sent to a different lookup
+// flow (vocab card, describe-what-you-mean, find-the-right-phrase, or
+// check-word-choice). Built so a mixed dump from handwritten notes can be
+// triaged in one place instead of round-tripping through different screens.
+
+let triageRows = [];
+
+const TRIAGE_TOOLS = [
+  { key: 'lookup',     label: 'Look up word',         desc: 'Get definition + example for a vocab word',         icon: '🔍' },
+  { key: 'reverse',    label: 'Describe what you mean', desc: 'You described a concept, get the right word/phrase', icon: '🧠' },
+  { key: 'fix-phrase', label: 'Find the right phrase', desc: 'You wrote a phrase that\'s close — find the correct version', icon: '🪄' },
+  { key: 'critique',   label: 'Check my word choice', desc: 'Validate a sentence/word usage',                     icon: '✅' },
+];
+
+function quickAddTriage() {
+  const input = document.getElementById('quick-add-input');
+  const raw = input.value.trim();
+  if (!raw) { showToast('Paste some lines first'); return; }
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) { showToast('No lines to triage'); return; }
+  triageRows = lines.map(text => ({
+    text,
+    tool: 'lookup',
+    sentence: text, // for critique: the full line
+    word: '',       // for critique: which word(s) to check
+    intendedMeaning: '', // for fix-phrase + critique
+    result: null,
+    status: 'idle', // idle | running | done | error
+    error: null,
+  }));
+  document.getElementById('quick-add-step1').style.display = 'none';
+  document.getElementById('quick-add-triage').style.display = 'block';
+  renderTriageRows();
+}
+
+function quickAddBackToStep1() {
+  document.getElementById('quick-add-triage').style.display = 'none';
+  document.getElementById('quick-add-step1').style.display = 'block';
+}
+
+function renderTriageRows() {
+  const container = document.getElementById('qa-triage-rows');
+  if (!container) return;
+  container.innerHTML = triageRows.map((r, i) => {
+    const optionsHtml = TRIAGE_TOOLS.map(t =>
+      `<option value="${t.key}" ${t.tool === r.tool || (t.key === r.tool) ? 'selected' : ''}>${t.icon} ${t.label}</option>`
+    ).join('');
+    const extra = renderTriageExtras(r, i);
+    const resultHtml = renderTriageResult(r, i);
+    const statusBadge = r.status === 'running' ? '<span style="font-size:0.7rem; color:var(--text-dim);">running…</span>'
+      : r.status === 'error' ? `<span style="font-size:0.7rem; color:var(--red);">${escapeHtml(r.error || 'error')}</span>`
+      : r.status === 'done' ? '<span style="font-size:0.7rem; color:var(--green);">✓ ran</span>'
+      : '';
+    return `
+      <div class="qa-card" style="margin-bottom:12px;" data-triage-index="${i}">
+        <div style="display:flex; align-items:flex-start; gap:8px;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:600; font-size:0.95rem; color:var(--text); margin-bottom:6px; word-break:break-word;">${escapeHtml(r.text)}</div>
+            <select onchange="triageSetTool(${i}, this.value)" style="width:100%; max-width:340px; padding:6px 10px; font-size:0.82rem; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text); font-family:inherit;">
+              ${optionsHtml}
+            </select>
+            ${extra}
+          </div>
+          <button class="qa-remove-btn" onclick="triageRemoveRow(${i})" title="Remove this line">×</button>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+          <button class="btn-secondary" onclick="triageRunRow(${i})" style="width:auto; padding:5px 12px; font-size:0.78rem;" ${r.status === 'running' ? 'disabled' : ''}>${r.status === 'done' ? 'Re-run' : 'Run'}</button>
+          ${statusBadge}
+        </div>
+        ${resultHtml ? `<div style="margin-top:10px;">${resultHtml}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+function renderTriageExtras(r, i) {
+  // Conditional extra-input fields per tool. Placeholder labels guide the user.
+  if (r.tool === 'fix-phrase') {
+    return `
+      <div style="margin-top:6px;">
+        <input type="text" placeholder="What you're trying to say (optional, helps a lot)"
+          value="${escapeHtml(r.intendedMeaning || '')}"
+          oninput="triageSetField(${i}, 'intendedMeaning', this.value)"
+          style="width:100%; padding:6px 10px; font-size:0.82rem; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text);">
+      </div>`;
+  }
+  if (r.tool === 'critique') {
+    return `
+      <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
+        <input type="text" placeholder="Specific word(s) to check (optional)"
+          value="${escapeHtml(r.word || '')}"
+          oninput="triageSetField(${i}, 'word', this.value)"
+          style="flex:1; min-width:160px; padding:6px 10px; font-size:0.82rem; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text);">
+        <input type="text" placeholder="What you meant (optional)"
+          value="${escapeHtml(r.intendedMeaning || '')}"
+          oninput="triageSetField(${i}, 'intendedMeaning', this.value)"
+          style="flex:1; min-width:160px; padding:6px 10px; font-size:0.82rem; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text);">
+      </div>`;
+  }
+  return '';
+}
+
+function triageSetTool(i, tool) {
+  if (!triageRows[i]) return;
+  triageRows[i].tool = tool;
+  triageRows[i].result = null;
+  triageRows[i].status = 'idle';
+  triageRows[i].error = null;
+  renderTriageRows();
+}
+
+function triageSetField(i, field, value) {
+  if (!triageRows[i]) return;
+  triageRows[i][field] = value;
+}
+
+function triageRemoveRow(i) {
+  triageRows.splice(i, 1);
+  if (triageRows.length === 0) {
+    quickAddBackToStep1();
+    showToast('All lines removed');
+    return;
+  }
+  renderTriageRows();
+}
+
+async function triageRunRow(i) {
+  const r = triageRows[i];
+  if (!r) return;
+  r.status = 'running';
+  r.error = null;
+  renderTriageRows();
+  try {
+    if (r.tool === 'lookup') {
+      const resp = await apiFetch('/api/batch-enrich', { phrases: [r.text] });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      r.result = (data.results && data.results[0]) || null;
+      if (!r.result) throw new Error('No result returned');
+    } else if (r.tool === 'reverse') {
+      const resp = await apiFetch('/api/reverse-lookup', { description: r.text });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      r.result = data.results || [];
+    } else if (r.tool === 'fix-phrase') {
+      const intent = r.intendedMeaning ? ` Trying to express: "${r.intendedMeaning}".` : '';
+      const description = `The user wrote the near-phrase "${r.text}" but suspects it isn't the canonical English phrasing.${intent} Suggest 3-5 correct or commonly-used phrasings that capture the same meaning. Each result should be the corrected/canonical phrase, not a different concept.`;
+      const resp = await apiFetch('/api/reverse-lookup', { description });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      r.result = data.results || [];
+    } else if (r.tool === 'critique') {
+      const word = (r.word || '').trim() || r.text.split(/\s+/).slice(-1)[0]; // last word as fallback
+      const resp = await apiFetch('/api/critique', { sentence: r.text, word, intendedMeaning: r.intendedMeaning || undefined });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      r.result = data;
+    }
+    r.status = 'done';
+  } catch (err) {
+    r.status = 'error';
+    r.error = err.message || 'failed';
+  }
+  renderTriageRows();
+}
+
+async function quickAddRunAll() {
+  const btn = document.getElementById('qa-triage-run-all');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Running…';
+  // Run pending rows in parallel, but cap concurrency at 4 so we don't blast the API
+  const queue = triageRows.map((_, i) => i).filter(i => triageRows[i].status !== 'done');
+  const concurrency = 4;
+  const workers = [];
+  let next = 0;
+  for (let w = 0; w < Math.min(concurrency, queue.length); w++) {
+    workers.push((async () => {
+      while (next < queue.length) {
+        const idx = queue[next++];
+        await triageRunRow(idx);
+      }
+    })());
+  }
+  await Promise.all(workers);
+  btn.disabled = false;
+  btn.textContent = orig;
+  showToast('Done. Review the results below.');
+}
+
+function renderTriageResult(r, i) {
+  if (!r.result) return '';
+  if (r.tool === 'lookup') {
+    return triageRenderSingleCard(r.result, i, -1);
+  }
+  if (r.tool === 'reverse' || r.tool === 'fix-phrase') {
+    if (!Array.isArray(r.result) || r.result.length === 0) {
+      return '<div style="color:var(--text-dim); font-size:0.8rem;">No suggestions returned.</div>';
+    }
+    const headerLabel = r.tool === 'fix-phrase' ? 'Suggested correct phrasings' : 'Matching phrases';
+    return `<div style="font-size:0.7rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">${headerLabel}</div>` +
+      r.result.map((cand, j) => triageRenderSingleCard(cand, i, j)).join('');
+  }
+  if (r.tool === 'critique') {
+    const c = r.result;
+    const verdictColor = c.verdict === 'correct' ? 'var(--green)' : c.verdict === 'awkward' ? 'var(--orange)' : 'var(--red)';
+    const altsHtml = (c.alternatives || []).map(a =>
+      `<button class="btn-secondary" onclick="triageAddAlternative(${i}, '${escapeHtml(a).replace(/'/g, "\\'")}')" style="width:auto; padding:4px 10px; font-size:0.78rem;">+ ${escapeHtml(a)}</button>`
+    ).join(' ');
+    return `
+      <div style="background:var(--surface1); padding:10px 12px; border-radius:10px; border-left:3px solid ${verdictColor};">
+        <div style="font-size:0.7rem; font-weight:700; color:${verdictColor}; text-transform:uppercase; letter-spacing:0.05em;">${escapeHtml((c.verdict || '').toUpperCase())}</div>
+        <div style="font-size:0.88rem; margin-top:6px; line-height:1.5;">${escapeHtml(c.explanation || '')}</div>
+        ${c.suggestedWord && c.suggestedWord !== (r.word || '') ? `<div style="font-size:0.85rem; margin-top:6px;"><strong>Suggested:</strong> ${escapeHtml(c.suggestedWord)}</div>` : ''}
+        ${c.correctedSentence ? `<div style="font-size:0.85rem; margin-top:6px; font-style:italic; color:var(--text-dim);">${escapeHtml(c.correctedSentence)}</div>` : ''}
+        ${altsHtml ? `<div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;"><span style="font-size:0.7rem; color:var(--text-dim);">Alternatives:</span> ${altsHtml}</div>` : ''}
+      </div>`;
+  }
+  return '';
+}
+
+function triageRenderSingleCard(card, rowI, candIdx) {
+  // candIdx === -1 means the row's `result` is itself the card (lookup tool).
+  // Otherwise it's the candIdx-th element of the row's `result` array.
+  if (!card || !card.phrase) return '';
+  const phraseEsc = escapeHtml(card.phrase);
+  const isDupe = cards.some(c => c.phrase.toLowerCase() === card.phrase.toLowerCase());
+  return `
+    <div class="qa-card" style="margin-top:6px; background:var(--surface1);">
+      <div class="qa-card-header">
+        <span class="phrase">${phraseEsc}</span>
+        <span class="tag">${escapeHtml(card.category || 'word')}</span>
+        ${isDupe ? '<span class="dupe-tag">already in deck</span>' : ''}
+      </div>
+      <div style="font-size:0.85rem; margin-top:4px;">${escapeHtml(card.meaning || '')}</div>
+      ${card.example ? `<div class="example-row"><span class="example-text">${escapeHtml(card.example)}</span></div>` : ''}
+      ${isDupe ? '' : `<button class="btn-primary" onclick="triageAddCard(${rowI}, ${candIdx})" style="margin-top:8px; width:100%; padding:8px; font-size:0.85rem;">Add to Deck</button>`}
+    </div>`;
+}
+
+// Looks up the card by row + candidate index (avoids inlining the JSON
+// in onclick, which would break on apostrophes inside meaning/example).
+async function triageAddCard(rowI, candIdx) {
+  const r = triageRows[rowI];
+  if (!r) return;
+  const card = candIdx === -1 ? r.result : (Array.isArray(r.result) ? r.result[candIdx] : null);
+  if (!card || !card.phrase) return;
+  if (cards.some(c => c.phrase.toLowerCase() === card.phrase.toLowerCase())) {
+    showToast('Already in deck');
+    return;
+  }
+  const today = getToday();
+  const now = new Date().toISOString();
+  cards.unshift({
+    id: generateId(),
+    phrase: card.phrase,
+    meaning: card.meaning || '',
+    example: card.example || '',
+    category: card.category || 'word',
+    bucket: undefined,
+    createdAt: now,
+    source: 'Quick Add (triage)',
+    sourceContext: r.text || null,
+    easeFactor: 2.5,
+    interval: 0,
+    repetitions: 0,
+    nextReview: today,
+    lastReview: null,
+  });
+  await saveCards(cards);
+  updateDashboard();
+  showToast(`Added "${card.phrase}"`);
+  renderTriageRows(); // re-render so the dupe pill shows
+}
+
+async function triageAddAlternative(rowI, alt) {
+  // Looks up the alternative word as a vocab card, then adds it.
+  try {
+    const resp = await apiFetch('/api/batch-enrich', { phrases: [alt] });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Lookup failed');
+    const card = (data.results && data.results[0]) || null;
+    if (!card) throw new Error('No result');
+    await triageAddCard(rowI, card);
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  }
+}
+
 async function quickAddGenerate() {
   const input = document.getElementById('quick-add-input');
   const raw = input.value.trim();
@@ -6557,9 +6860,14 @@ async function quickAddConfirm() {
 
 function quickAddReset() {
   quickAddResults = [];
+  triageRows = [];
   document.getElementById('quick-add-input').value = '';
   document.getElementById('quick-add-step1').style.display = 'block';
   document.getElementById('quick-add-step2').style.display = 'none';
+  const triageEl = document.getElementById('quick-add-triage');
+  if (triageEl) triageEl.style.display = 'none';
+  const triageRowsEl = document.getElementById('qa-triage-rows');
+  if (triageRowsEl) triageRowsEl.innerHTML = '';
   document.getElementById('quick-add-progress').style.display = 'none';
   document.getElementById('quick-add-preview').innerHTML = '';
 }
@@ -7247,14 +7555,15 @@ function updateConceptsDashboard() {
     }
   }
 
-  // Top tags cloud — top 12 by frequency, sorted desc
+  // Tags cloud — every tag the user has, sorted by frequency desc.
+  // Earlier was capped to top 12 which hid the long tail.
   const tagCloud = document.getElementById('kb-tags-cloud');
   if (tagCloud) {
     const tagCounts = new Map();
     concepts.forEach(c => (c.tags || []).forEach(t => {
       tagCounts.set(t, (tagCounts.get(t) || 0) + 1);
     }));
-    const sorted = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+    const sorted = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]);
     if (sorted.length === 0) {
       tagCloud.innerHTML = '<div class="kb-recent-empty" style="padding:8px 0;">No tags yet — they appear as you add concepts.</div>';
     } else {
