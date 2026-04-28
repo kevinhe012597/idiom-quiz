@@ -522,6 +522,27 @@ function isReasoningModel(model) {
   return /^gpt-5\.5/.test(model) || /^o[1-9]\b/.test(model);
 }
 
+// Strip Anthropic web_search inline citation annotations like
+// <cite index="19-9,18-1">text</cite> — they leak through the tool_use input
+// field as literal text, since they were inserted by the model into a string.
+// Keeps the inner text and drops the surrounding tags.
+function stripCitationTags(s) {
+  if (typeof s !== 'string') return s;
+  return s
+    .replace(/<cite\b[^>]*>([\s\S]*?)<\/cite>/gi, '$1')
+    .replace(/<\/?cite\b[^>]*>/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+function stripCitationsFromCard(card) {
+  if (!card || typeof card !== 'object') return card;
+  if (typeof card.title === 'string') card.title = stripCitationTags(card.title);
+  if (typeof card.summary === 'string') card.summary = stripCitationTags(card.summary);
+  if (Array.isArray(card.points)) card.points = card.points.map(p => stripCitationTags(p));
+  if (Array.isArray(card.tags)) card.tags = card.tags.map(t => stripCitationTags(t));
+  return card;
+}
+
 // Build https.request options + body from a payload string (auto-detects provider from model)
 function buildRequestOptions(payload) {
   let model = DEFAULT_MODEL;
@@ -1084,6 +1105,7 @@ ${existingTagsBlock(existingTags)}`;
                   const jsonStr = textParts.replace(/^```json\s*/, '').replace(/\s*```$/, '');
                   result = JSON.parse(jsonStr);
                 }
+                stripCitationsFromCard(result);
                 result._model = lookupModel;
                 if (noteForUser) result._fallbackNote = noteForUser;
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1812,6 +1834,7 @@ CRITICAL: Your FINAL message must contain ONLY a valid JSON object. No prose, no
               // Look for the structured tool_use response first (preferred path)
               const toolUse = (parsed.content || []).find(b => b.type === 'tool_use' && b.name === 'save_regenerated_card');
               if (toolUse && toolUse.input) {
+                stripCitationsFromCard(toolUse.input);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(toolUse.input));
                 return;
@@ -1962,6 +1985,7 @@ ${existingTagsBlock(existingTags)}`;
                 const out = JSON.parse(content);
                 results = Array.isArray(out) ? out : (Array.isArray(out.results) ? out.results : [out]);
               }
+              if (Array.isArray(results)) results.forEach(stripCitationsFromCard);
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ results }));
             } catch (e) {
