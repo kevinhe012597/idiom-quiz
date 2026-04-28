@@ -7365,11 +7365,15 @@ function openLibraryEntry(source) {
 
 // ─── Concept Lookup ─────────────────────────────────────────────────────
 
-function setLookupModelBadge(model) {
+function setLookupModelBadge(model, fallbackNote) {
   const el = document.getElementById('cl-model-badge');
   if (!el) return;
   if (model) {
-    el.textContent = `via ${model}`;
+    if (fallbackNote) {
+      el.innerHTML = `via ${escapeHtml(model)} <span style="color:var(--orange); margin-left:6px;" title="${escapeHtml(fallbackNote)}">⚠ ${escapeHtml(fallbackNote)}</span>`;
+    } else {
+      el.textContent = `via ${model}`;
+    }
     el.style.display = 'block';
   } else {
     el.textContent = '';
@@ -7393,7 +7397,7 @@ async function doConceptLookup() {
     conceptLookupData = result;
 
     document.getElementById('cl-title').textContent = result.title || query;
-    setLookupModelBadge(result._model);
+    setLookupModelBadge(result._model, result._fallbackNote);
 
     // Render bullet points (new format) or fall back to summary+details (old format)
     const points = result.points || [];
@@ -7491,7 +7495,7 @@ async function tailorConceptLookup(appendMode) {
     conceptLookupData = result;
 
     document.getElementById('cl-title').textContent = result.title || '';
-    setLookupModelBadge(result._model);
+    setLookupModelBadge(result._model, result._fallbackNote);
     const points = result.points || [];
     if (points.length > 0) {
       document.getElementById('cl-body').innerHTML = '<ul style="margin:0; padding-left:18px;">' +

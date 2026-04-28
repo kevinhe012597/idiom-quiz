@@ -806,10 +806,16 @@ const server = http.createServer(async (req, res) => {
 
         // Concept lookup needs web search. Two paths:
         //   - User picked an Anthropic model → Anthropic Messages API + web_search_20250305 + tool_use for structured JSON
-        //   - User picked anything else → OpenAI Responses API + web_search_preview (existing path)
-        // Previously we always forced an OpenAI model, which made the homepage Sonnet selection silently get ignored here.
+        //   - User picked an OpenAI model (or non-web-search model) → OpenAI Responses API + web_search_preview
+        // If the user picked a Fireworks model (DeepSeek/Llama/Qwen), web search isn't available
+        // through that provider, so we fall back to OpenAI default — and surface a note so it isn't a silent surprise.
         const userPickedAnthropic = !!(_body.model && ANTHROPIC_MODELS.has(_body.model));
-        const lookupModel = userPickedAnthropic ? _body.model : (OPENAI_MODELS.has(pickModel(_body)) ? pickModel(_body) : DEFAULT_MODEL);
+        const userPickedOpenAI = !!(_body.model && OPENAI_MODELS.has(_body.model));
+        const lookupModel = userPickedAnthropic ? _body.model : (userPickedOpenAI ? _body.model : DEFAULT_MODEL);
+        // Note shown to the user when their selected model couldn't honor the lookup.
+        const noteForUser = (!userPickedAnthropic && !userPickedOpenAI && _body.model)
+          ? `Lookup needs web search, which ${_body.model} doesn't expose. Used ${DEFAULT_MODEL} instead.`
+          : null;
 
         // APPEND MODE: user wants to ADD bullets without dropping existing ones.
         // We tell the model: here's what's already saved; generate ONLY new bullets
@@ -906,6 +912,7 @@ ${existingTagsBlock(existingTags)}`;
                 const result = JSON.parse(jsonStr);
                 result._model = model;
                 if (fallbackNote) result._fallbackNote = fallbackNote;
+                else if (noteForUser) result._fallbackNote = noteForUser;
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(result));
               } catch (e) {
@@ -991,6 +998,7 @@ ${existingTagsBlock(existingTags)}`;
                   result = JSON.parse(jsonStr);
                 }
                 result._model = lookupModel;
+                if (noteForUser) result._fallbackNote = noteForUser;
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(result));
               } catch (e) {
