@@ -978,13 +978,15 @@ ${existingTagsBlock(existingTags)}`;
         // OpenAI lookup runner — used both as the primary path when the user
         // picked an OpenAI model AND as a fallback when Anthropic rate-limits.
         function runOpenAILookup(model, fallbackNote) {
-          const payload = JSON.stringify({
+          // Reasoning models (gpt-5.5, o-series) reject `temperature` — omit it.
+          const payloadObj = {
             model,
             instructions,
             input: query,
             tools: [{ type: 'web_search_preview' }],
-            temperature: 0.5
-          });
+          };
+          if (!isReasoningModel(model)) payloadObj.temperature = 0.5;
+          const payload = JSON.stringify(payloadObj);
           const options = {
             hostname: 'api.openai.com',
             path: '/v1/responses',
