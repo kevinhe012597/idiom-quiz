@@ -2705,6 +2705,7 @@ textarea { resize: vertical; min-height: 80px; }
     <div style="display:flex; gap:0; margin-bottom:16px; border-bottom:2px solid var(--surface2); flex-wrap:wrap;">
       <button id="concept-tab-article" onclick="switchConceptTab('article')" style="flex:1; padding:10px; border:none; background:none; font-size:0.85rem; font-weight:600; cursor:pointer; color:var(--concept); border-bottom:2px solid var(--concept); margin-bottom:-2px;">Import from Article</button>
       <button id="concept-tab-youtube" onclick="switchConceptTab('youtube')" style="flex:1; padding:10px; border:none; background:none; font-size:0.85rem; font-weight:600; cursor:pointer; color:var(--text-dim); border-bottom:2px solid transparent; margin-bottom:-2px;">YouTube</button>
+      <button id="concept-tab-thought" onclick="switchConceptTab('thought')" style="flex:1; padding:10px; border:none; background:none; font-size:0.85rem; font-weight:600; cursor:pointer; color:var(--text-dim); border-bottom:2px solid transparent; margin-bottom:-2px;">My Thought</button>
     </div>
 
     <!-- Article import panel -->
@@ -2771,6 +2772,23 @@ textarea { resize: vertical; min-height: 80px; }
       </div>
       <button class="btn-primary concept-btn" id="concept-youtube-btn" onclick="extractConceptsFromYoutube()" style="width:100%; margin-top:8px;">Extract Concepts</button>
       <p style="color:var(--text-dim); font-size:0.7rem; margin-top:8px; text-align:center;">Public videos only. Up to ~3 hours per video.</p>
+    </div>
+
+    <!-- My Thought panel — polish a fully-formed insight into one concise card -->
+    <div id="concept-panel-thought" style="display:none;">
+      <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:12px;">
+        Have a thought you want to remember? Drop it in. The AI keeps your point as-is and just sharpens it — no padding, no hallucinated bullets.
+      </p>
+      <textarea id="concept-thought-input" rows="6" placeholder='e.g. LLMs are like operating systems — Microsoft built native apps like Office, but there is still a lot of space for other startups to build on top.' style="width:100%; padding:10px 14px; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-size:0.9rem; font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
+      <input type="text" id="concept-thought-source" placeholder="Source (optional, e.g. shower thought, dinner with X)" style="width:100%; margin-top:8px; padding:10px 14px; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-size:0.85rem; box-sizing:border-box;">
+      <div id="concept-thought-progress" class="extract-progress" style="display:none;">
+        <div class="extract-progress-header">
+          <span class="extract-progress-label" id="concept-thought-progress-label">✨ Polishing your thought...</span>
+          <span class="extract-progress-time" id="concept-thought-progress-time">0s</span>
+        </div>
+        <div class="extract-progress-track"><div class="extract-progress-fill" id="concept-thought-progress-fill"></div></div>
+      </div>
+      <button class="btn-primary concept-btn" id="concept-thought-btn" onclick="polishThought()" style="width:100%; margin-top:8px;">Polish Thought</button>
     </div>
 
     <!-- Shared results step (used by both quick add and article import) -->
@@ -8654,6 +8672,10 @@ function conceptQuickReset() {
   const ytG = document.getElementById('concept-youtube-guidance'); if (ytG) ytG.value = '';
   const ytC = document.getElementById('concept-youtube-count'); if (ytC) ytC.value = '';
   const ytP = document.getElementById('concept-youtube-progress'); if (ytP) ytP.style.display = 'none';
+  // Thought tab reset
+  const th = document.getElementById('concept-thought-input'); if (th) th.value = '';
+  const thS = document.getElementById('concept-thought-source'); if (thS) thS.value = '';
+  const thP = document.getElementById('concept-thought-progress'); if (thP) thP.style.display = 'none';
 
   pendingDocBase64 = null;
   pendingDocType = null;
@@ -8669,8 +8691,8 @@ function conceptQuickReset() {
 }
 
 function switchConceptTab(tab) {
-  const tabs = { article: 'concept-panel-article', youtube: 'concept-panel-youtube' };
-  const tabBtns = { article: 'concept-tab-article', youtube: 'concept-tab-youtube' };
+  const tabs = { article: 'concept-panel-article', youtube: 'concept-panel-youtube', thought: 'concept-panel-thought' };
+  const tabBtns = { article: 'concept-tab-article', youtube: 'concept-tab-youtube', thought: 'concept-tab-thought' };
 
   // Hide all panels
   Object.values(tabs).forEach(id => {
@@ -9427,6 +9449,59 @@ async function extractConceptsFromYoutube() {
     showScreen('concepts-dashboard');
   } catch (err) {
     showToast('Error: ' + err.message);
+  }
+}
+
+// Polish a single fully-formed thought into one concise card. Goes through
+// the same preview/save flow as article extraction, so the user can edit,
+// pick the destination (📚 Library / 🎯 Drill), and save like any other card.
+async function polishThought() {
+  const ta = document.getElementById('concept-thought-input');
+  const sourceEl = document.getElementById('concept-thought-source');
+  const thought = ta.value.trim();
+  if (!thought || thought.length < 5) { showToast('Type a fuller thought first'); return; }
+
+  const btn = document.getElementById('concept-thought-btn');
+  const progress = document.getElementById('concept-thought-progress');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Polishing…';
+  startExtractProgress('concept-thought', [
+    { label: '✨ Reading your thought...', atSec: 0 },
+    { label: '🪄 Sharpening...',           atSec: 4 },
+    { label: '⏳ Almost done...',           atSec: 10 },
+  ]);
+
+  const startTs = Date.now();
+  try {
+    const response = await apiFetch('/api/polish-thought', { thought });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    if (!data.card) throw new Error('Empty response');
+
+    // Pipe the single card into the existing preview UI so the user can
+    // edit + pick destination + save like any other extraction.
+    const elapsedMs = Date.now() - startTs;
+    const sourceLabel = sourceEl.value.trim() || 'Polished thought';
+    lastExtractContext = { text: thought };
+    renderConceptExtractionResults(
+      [data.card],
+      sourceLabel,
+      sourceLabel,
+      'concept-panel-thought',
+      { model: data.model, elapsedMs, usedGemini: false }
+    );
+    showToast('Thought polished — review and save');
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+    stopExtractProgress('concept-thought');
+    if (progress) progress.style.display = 'none';
   }
 }
 

@@ -1346,6 +1346,112 @@ ${existingTagsBlock(existingTags)}`
   }
 
   // Fetch + extract article body from a URL (Mozilla Readability)
+  // Polish a fully-formed thought into a single concise card. Distinct from
+  // /api/concept-lookup (which researches a topic) and /api/extract-concepts
+  // (which extracts multiple cards from a body of text). Here the user has
+  // ONE complete thought — the model should sharpen it, not pad it.
+  if (req.method === 'POST' && req.url === '/api/polish-thought') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { thought, existingTags } = _body;
+        if (!thought || typeof thought !== 'string' || thought.trim().length < 5) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing or too-short thought' }));
+          return;
+        }
+
+        const usedModel = pickAnthropicModel(_body);
+        const polishTool = {
+          name: 'save_polished_thought',
+          description: 'Save the polished version of the user\'s thought as a single card.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Self-explanatory title that names the thought (NOT a question, NOT vague). E.g. "LLMs as Operating Systems: Native Apps + Third-Party Ecosystem".' },
+              points: {
+                type: 'array',
+                items: { type: 'string' },
+                description: '2-4 bullets. First MUST start with "TL;DR: " and capture the core thought as a memorable cocktail-party line. Remaining 1-3 bullets sharpen the original — add a concrete example/named entity, name the analogy more precisely, or extend the implication. NEVER hallucinate facts not implied by the thought. NEVER pad to hit a count.',
+              },
+              tags: { type: 'array', items: { type: 'string' }, description: '1-2 tags from the existing tag list, or [] if none fit.' },
+            },
+            required: ['title', 'points', 'tags'],
+          },
+        };
+
+        const systemPrompt = `You are helping a user crystallize their own thought into a memorable flashcard. They've written a complete idea — your job is to sharpen and frame it, NOT to research the topic or generate independent commentary.
+
+CRITICAL RULES:
+- Stay extremely close to the user's actual point. Do not invent facts, examples, or claims they didn't make.
+- Generate 2-4 bullets total. If the thought is short and self-contained, return 2 bullets (TL;DR + one sharpening). Do NOT pad to 5-7.
+- The TL;DR bullet captures THEIR thought as a punchy line they'd say at a cocktail party.
+- Sharpening bullets do one of: (a) make the analogy more vivid by adding ONE concrete named example aligned with their framing, (b) sharpen vague language into specific terms, (c) name the implication or "so what" more crisply.
+- Title: declarative, names the concept. Self-explanatory cold (drill review only shows the title).
+
+${skillsBlock(['Self-Explanatory Titles', 'TL;DR First Bullet', 'Tags'])}
+
+${existingTagsBlock(existingTags)}`;
+
+        const anthropicPayload = JSON.stringify({
+          model: usedModel,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: `Polish this thought:\n\n"${thought.trim()}"` }],
+          max_tokens: 1500,
+          tools: [polishTool],
+          tool_choice: { type: 'tool', name: 'save_polished_thought' },
+        });
+
+        const https = require('https');
+        const apiReq = https.request({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(anthropicPayload),
+          },
+        }, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('polish-thought Anthropic error:', apiRes.statusCode, data.slice(0, 300));
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `Polish failed (HTTP ${apiRes.statusCode})` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const toolUse = (parsed.content || []).find(b => b.type === 'tool_use' && b.name === 'save_polished_thought');
+              if (!toolUse || !toolUse.input) throw new Error('No tool_use in response');
+              const card = toolUse.input;
+              stripCitationsFromCard(card);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ card, model: usedModel }));
+            } catch (e) {
+              console.error('polish-thought parse error:', e.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(anthropicPayload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/fetch-article') {
     let body = '';
     req.on('data', c => { body += c; });
