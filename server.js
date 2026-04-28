@@ -777,6 +777,49 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ─── Dossier (people + firms) storage ───────────────────────────────────
+  // Stored as the single 'dossier_entities' key in app_state. Each entity is
+  // { id, type, name, categories, notes, ... }. Same persistence pattern as concepts.
+  if (req.method === 'GET' && req.url === '/api/dossier') {
+    try {
+      const row = selectAppStateStmt.get('dossier_entities');
+      const entities = row && row.value ? JSON.parse(row.value) : [];
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ entities: Array.isArray(entities) ? entities : [] }));
+    } catch (err) {
+      console.error('Load dossier error:', err.message);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (req.method === 'PUT' && req.url === '/api/dossier') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const parsed = JSON.parse(body || '{}');
+        if (!Array.isArray(parsed.entities)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing required field: entities (array)' }));
+          return;
+        }
+        const entities = parsed.entities
+          .filter(e => e && typeof e === 'object' && typeof e.name === 'string' && e.name.trim().length > 0)
+          .map(e => ({ ...e, name: e.name.trim() }));
+        upsertAppStateStmt.run('dossier_entities', JSON.stringify(entities), new Date().toISOString());
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, count: entities.length }));
+      } catch (err) {
+        console.error('Save dossier error:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   // ─── Scratchpad (single string) ──────────────────────────────────────────
   if (req.method === 'GET' && req.url === '/api/scratchpad') {
     try {
@@ -1350,6 +1393,229 @@ ${existingTagsBlock(existingTags)}`
   // /api/concept-lookup (which researches a topic) and /api/extract-concepts
   // (which extracts multiple cards from a body of text). Here the user has
   // ONE complete thought — the model should sharpen it, not pad it.
+  // ─── Dossier AI: 3-5 bullet recap of an entity from its notes ─────────────
+  if (req.method === 'POST' && req.url === '/api/dossier-summary') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { entity } = _body;
+        if (!entity || typeof entity !== 'object' || !entity.name) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing entity' }));
+          return;
+        }
+
+        const usedModel = pickAnthropicModel(_body);
+        const isPerson = entity.type === 'person';
+        const profileLines = [];
+        if (isPerson) {
+          if (entity.role) profileLines.push(`Role: ${entity.role}`);
+          if (entity.firm) profileLines.push(`Firm: ${entity.firm}`);
+          if (entity.location) profileLines.push(`Location: ${entity.location}`);
+          if (entity.howIMet) profileLines.push(`How I met: ${entity.howIMet}`);
+        } else {
+          if (entity.sector) profileLines.push(`Sector: ${entity.sector}`);
+          if (entity.hq) profileLines.push(`HQ: ${entity.hq}`);
+          if (entity.size) profileLines.push(`Size: ${entity.size}`);
+        }
+        if (entity.categories && entity.categories.length) profileLines.push(`Categories: ${entity.categories.join(', ')}`);
+        const notes = (entity.notes || []).slice().sort((a, b) =>
+          new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+        );
+        const notesText = notes.length === 0
+          ? '(No notes yet — return a single bullet saying so.)'
+          : notes.map(n => {
+              const d = n.createdAt ? new Date(n.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+              const src = n.source ? ` · ${n.source}` : '';
+              return `[${d}${src}] ${n.body || ''}`;
+            }).join('\n');
+
+        const systemPrompt = `You are summarizing what the user knows about a ${isPerson ? 'person' : 'firm'} they keep a private dossier on. Read the chronological notes (oldest first) and return 3-5 bullets that capture the most useful, distinctive facts.
+
+Rules:
+- One fact per bullet. No headers, no preamble, no bullet character — just plain text lines separated by newlines.
+- Lead with the most-recent / most-distinctive bullets.
+- DO NOT speculate, generalize, or invent. Stay strictly within what the notes say.
+- If the notes are sparse or empty, return ONE bullet saying so honestly.
+- Voice: concise, factual, like a personal-CRM recap.`;
+
+        const userMsg = `Name: ${entity.name}
+Type: ${isPerson ? 'Person' : 'Firm'}
+${profileLines.join('\n')}
+
+Notes (oldest first):
+${notesText}`;
+
+        const anthropicPayload = JSON.stringify({
+          model: usedModel,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userMsg }],
+          max_tokens: 800,
+        });
+        const https = require('https');
+        const apiReq = https.request({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(anthropicPayload),
+          },
+        }, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('dossier-summary Anthropic error:', apiRes.statusCode, data.slice(0, 300));
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `Summary failed (HTTP ${apiRes.statusCode})` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const text = (parsed.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n').trim();
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ summary: text, model: usedModel }));
+            } catch (e) {
+              console.error('dossier-summary parse error:', e.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(anthropicPayload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // ─── Dossier AI: pre-meeting brief (one-pager from all notes) ────────────
+  if (req.method === 'POST' && req.url === '/api/dossier-brief') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { entity, occasion } = _body;
+        if (!entity || typeof entity !== 'object' || !entity.name) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing entity' }));
+          return;
+        }
+        const usedModel = pickAnthropicModel(_body);
+        const isPerson = entity.type === 'person';
+        const profileLines = [];
+        if (isPerson) {
+          if (entity.role) profileLines.push(`Role: ${entity.role}`);
+          if (entity.firm) profileLines.push(`Firm: ${entity.firm}`);
+          if (entity.location) profileLines.push(`Location: ${entity.location}`);
+          if (entity.howIMet) profileLines.push(`How I met: ${entity.howIMet}`);
+        } else {
+          if (entity.sector) profileLines.push(`Sector: ${entity.sector}`);
+          if (entity.hq) profileLines.push(`HQ: ${entity.hq}`);
+          if (entity.size) profileLines.push(`Size: ${entity.size}`);
+        }
+        if (entity.categories && entity.categories.length) profileLines.push(`Categories: ${entity.categories.join(', ')}`);
+        const notes = (entity.notes || []).slice().sort((a, b) =>
+          new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+        );
+        const notesText = notes.length === 0
+          ? '(No notes yet.)'
+          : notes.map(n => {
+              const d = n.createdAt ? new Date(n.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+              const src = n.source ? ` · ${n.source}` : '';
+              return `[${d}${src}] ${n.body || ''}`;
+            }).join('\n');
+
+        const occasionClause = occasion && occasion.trim()
+          ? `\n\nThe user is preparing for: "${occasion.trim()}". Tailor the brief and talking points to that context.`
+          : '';
+
+        const systemPrompt = `You are writing a private pre-meeting brief for the user about a ${isPerson ? 'person' : 'firm'} they're about to meet/connect with. Read the chronological notes and return a Markdown one-pager structured as:
+
+**Quick recall** — 1-2 sentences they'd want to hear right before the meeting (who, role, where they met, current status).
+
+**Key facts** — grouped 3-6 bullets (e.g. work, personal, recent updates). Lead with the most distinctive items.
+
+**Open threads** — bullets of unresolved questions or follow-ups implied by the most recent notes (e.g. "last time he was looking at AI-infra deals — ask about that").
+
+**Talking points** — 3-5 specific topics the user could naturally bring up given what they know.
+
+Rules:
+- Stay strictly within the notes. Don't speculate or invent.
+- If notes are sparse, say so honestly — don't pad.
+- Use concrete names and dates from the notes.
+- Use Markdown headers (** **) and standard bullet lists with -.
+- ${isPerson ? 'Refer to the person by first name after the recall section.' : 'Refer to the firm by name throughout.'}${occasionClause}`;
+
+        const userMsg = `Name: ${entity.name}
+Type: ${isPerson ? 'Person' : 'Firm'}
+${profileLines.join('\n')}
+
+Notes (oldest first):
+${notesText}`;
+
+        const anthropicPayload = JSON.stringify({
+          model: usedModel,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userMsg }],
+          max_tokens: 2000,
+        });
+        const https = require('https');
+        const apiReq = https.request({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(anthropicPayload),
+          },
+        }, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('dossier-brief Anthropic error:', apiRes.statusCode, data.slice(0, 300));
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `Brief failed (HTTP ${apiRes.statusCode})` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const text = (parsed.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n').trim();
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ brief: text, model: usedModel }));
+            } catch (e) {
+              console.error('dossier-brief parse error:', e.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(anthropicPayload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/polish-thought') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
