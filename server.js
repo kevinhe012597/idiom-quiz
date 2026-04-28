@@ -182,11 +182,15 @@ const ANTHROPIC_MODELS = new Set([
 ]);
 
 const OPENAI_MODELS = new Set([
-  'gpt-4o-mini', 'gpt-5.4-nano', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-pro'
+  'gpt-4o-mini',
+  // 5.4 family kept for backward-compat with cards already saved with these IDs
+  'gpt-5.4-nano', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-pro',
+  // 5.5 family (current)
+  'gpt-5.5-nano', 'gpt-5.5-mini', 'gpt-5.5', 'gpt-5.5-pro',
 ]);
 
 const ALLOWED_MODELS = new Set([...OPENAI_MODELS, ...FIREWORKS_MODELS, ...ANTHROPIC_MODELS]);
-const DEFAULT_MODEL = 'gpt-5.4-mini';
+const DEFAULT_MODEL = 'gpt-5.5-mini';
 
 function pickModel(body) {
   return (body && body.model && ALLOWED_MODELS.has(body.model)) ? body.model : DEFAULT_MODEL;

@@ -1895,10 +1895,10 @@ textarea { resize: vertical; min-height: 80px; }
           <select id="model-select" class="model-select" onchange="saveModelChoice(this)" style="width:100%; margin-top:6px; padding:10px; border-radius:8px; border:1px solid var(--surface2); background:var(--bg); font-size:0.9rem; color:var(--text);">
             <optgroup label="OpenAI">
               <option value="gpt-4o-mini">GPT-4o Mini (fast & cheap)</option>
-              <option value="gpt-5.4-nano">GPT-5.4 Nano (fastest)</option>
-              <option value="gpt-5.4-mini">GPT-5.4 Mini (balanced)</option>
-              <option value="gpt-5.4">GPT-5.4 (powerful)</option>
-              <option value="gpt-5.4-pro">GPT-5.4 Pro (most powerful)</option>
+              <option value="gpt-5.5-nano">GPT-5.5 Nano (fastest)</option>
+              <option value="gpt-5.5-mini">GPT-5.5 Mini (balanced)</option>
+              <option value="gpt-5.5">GPT-5.5 (powerful)</option>
+              <option value="gpt-5.5-pro">GPT-5.5 Pro (most powerful)</option>
             </optgroup>
             <optgroup label="Anthropic">
               <option value="claude-opus-4-7">Claude Opus 4.7 (most powerful)</option>
@@ -1957,6 +1957,7 @@ textarea { resize: vertical; min-height: 80px; }
       <button class="btn-small btn-edit-review" onclick="editCurrentCard()" title="Edit this card">&#9998; Edit</button>
       <button class="btn-small btn-delete-review" onclick="deleteCurrentCard()" title="Delete this card">&#128465; Delete</button>
       <button class="btn-small btn-refine-review" onclick="toggleRefineFeedback()" title="Tell us how this word should be used" style="background:var(--accent); color:#fff;">&#128172; Refine</button>
+      <button class="btn-small" onclick="skipCurrentCard()" title="Skip to next card without rating" style="margin-left:auto;">Skip &rarr;</button>
     </div>
     <div class="refine-feedback-section" id="refine-feedback-section" style="display:none;">
       <label style="font-size:0.8rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Meaning / Definition</label>
@@ -2526,10 +2527,10 @@ textarea { resize: vertical; min-height: 80px; }
     <select id="concept-model-select" class="model-select" onchange="saveModelChoice(this)" style="width:100%; margin-top:6px; padding:10px; border-radius:8px; border:1px solid var(--surface2); background:var(--bg); font-size:0.9rem; color:var(--text);">
       <optgroup label="OpenAI">
         <option value="gpt-4o-mini">GPT-4o Mini (fast & cheap)</option>
-        <option value="gpt-5.4-nano">GPT-5.4 Nano (fastest)</option>
-        <option value="gpt-5.4-mini">GPT-5.4 Mini (balanced)</option>
-        <option value="gpt-5.4">GPT-5.4 (powerful)</option>
-        <option value="gpt-5.4-pro">GPT-5.4 Pro (most powerful)</option>
+        <option value="gpt-5.5-nano">GPT-5.5 Nano (fastest)</option>
+        <option value="gpt-5.5-mini">GPT-5.5 Mini (balanced)</option>
+        <option value="gpt-5.5">GPT-5.5 (powerful)</option>
+        <option value="gpt-5.5-pro">GPT-5.5 Pro (most powerful)</option>
       </optgroup>
       <optgroup label="Anthropic">
         <option value="claude-opus-4-7">Claude Opus 4.7 (most powerful)</option>
@@ -2927,7 +2928,10 @@ textarea { resize: vertical; min-height: 80px; }
           <button onclick="editConceptFromDrill()" style="margin-top:12px; padding:6px 14px; border:1px solid var(--surface2); border-radius:8px; background:none; color:var(--text-dim); font-size:0.8rem; cursor:pointer;">✏️ Edit this card</button>
         </div>
       </div>
-      <button class="btn-primary concept-btn" id="c-drill-reveal-btn" onclick="revealConceptDrill()" style="width:100%; margin-top:16px;">Reveal</button>
+      <div style="display:flex; gap:8px; margin-top:16px;">
+        <button class="btn-primary concept-btn" id="c-drill-reveal-btn" onclick="revealConceptDrill()" style="flex:1;">Reveal</button>
+        <button class="btn-secondary" onclick="skipConceptDrill()" title="Skip to next card without rating" style="width:auto; padding:0 18px;">Skip &rarr;</button>
+      </div>
       <div id="c-drill-value-row" style="display:none; margin-top:12px; padding:10px 12px; background:var(--surface1); border-radius:10px;">
         <div style="font-size:0.7rem; color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">Value of this card</div>
         <div id="c-drill-value-placeholder"></div>
@@ -3060,7 +3064,7 @@ const SAMPLE_DATA = [
 
 // ─── Model Selection ─────────────────────────────────────────────────────
 function getSelectedModel() {
-  return localStorage.getItem('lexicon-model') || 'gpt-5.4-mini';
+  return localStorage.getItem('lexicon-model') || 'gpt-5.5-mini';
 }
 function saveModelChoice(sourceEl) {
   const model = sourceEl ? sourceEl.value : (document.getElementById('model-select') || {}).value;
@@ -4613,6 +4617,18 @@ function rateCard(quality) {
     recordDailyReview(card.id, quality >= 4);
   }
 
+  reviewIndex++;
+  saveRecentProgress();
+  showCurrentCard();
+}
+
+// Skip the current card without recording a rating. Doesn't touch SRS state,
+// bucket, or ratingHistory — just advances the queue index.
+function skipCurrentCard() {
+  viewingPrevious = false;
+  historyBrowseIndex = -1;
+  if (reviewIndex >= reviewQueue.length) return;
+  reviewHistory.push(reviewIndex);
   reviewIndex++;
   saveRecentProgress();
   showCurrentCard();
@@ -8365,6 +8381,10 @@ function shortModelName(modelId) {
   if (modelId.startsWith('claude-opus-4-7'))    return 'Opus 4.7';
   if (modelId.startsWith('claude-sonnet-4-6'))  return 'Sonnet 4.6';
   if (modelId.startsWith('claude-haiku-4-5'))   return 'Haiku 4.5';
+  if (modelId.startsWith('gpt-5.5-pro'))        return 'GPT-5.5 Pro';
+  if (modelId.startsWith('gpt-5.5-mini'))       return 'GPT-5.5 Mini';
+  if (modelId.startsWith('gpt-5.5-nano'))       return 'GPT-5.5 Nano';
+  if (modelId.startsWith('gpt-5.5'))            return 'GPT-5.5';
   if (modelId.startsWith('gpt-5.4-pro'))        return 'GPT-5.4 Pro';
   if (modelId.startsWith('gpt-5.4-mini'))       return 'GPT-5.4 Mini';
   if (modelId.startsWith('gpt-5.4-nano'))       return 'GPT-5.4 Nano';
@@ -9892,6 +9912,14 @@ function rateConceptDrill(quality) {
   c.bucketUpdatedAt = getToday();
 
   saveConcepts(concepts);
+  conceptReviewIndex++;
+  showConceptDrillCard();
+}
+
+// Skip the current concept drill card without recording a rating.
+// Leaves SRS state, bucket, and lastReview untouched.
+function skipConceptDrill() {
+  if (conceptReviewIndex >= conceptReviewQueue.length) return;
   conceptReviewIndex++;
   showConceptDrillCard();
 }
