@@ -2530,8 +2530,6 @@ Return ONLY valid JSON array with this exact shape: [{"phrase":"...","category":
     return;
   }
 
-  // Temporarily log the actual OpenAI error body for /api/reverse-lookup to
-  // debug the gpt-5.5 400 — remove after the issue is identified.
   if (req.method === 'POST' && req.url === '/api/reverse-lookup') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
@@ -2568,8 +2566,7 @@ Return ONLY valid JSON array with this exact shape: [{"phrase":"...","category":
           apiRes.on('data', chunk => { data += chunk; });
           apiRes.on('end', () => {
             if (apiRes.statusCode !== 200) {
-              console.error(`reverse-lookup model=${pickModel(_body)} status=${apiRes.statusCode} body=`, data.slice(0, 600));
-              console.error('reverse-lookup sent body=', ((typeof options !== 'undefined' && options && options._body) || payload).slice(0, 400));
+              console.error(`reverse-lookup OpenAI error model=${pickModel(_body)} status=${apiRes.statusCode}`, data.slice(0, 300));
               res.writeHead(500, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: `OpenAI API error: ${apiRes.statusCode}` }));
               return;
