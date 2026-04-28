@@ -7513,7 +7513,10 @@ function updateModuleSelectCounts() {
 function updateConceptsDashboard() {
   const today = getToday();
   const weekCutoff = Date.now() - 7 * 86400000;
-  const todayCutoff = Date.now() - 1 * 86400000;
+  // Calendar-midnight cutoff for "today" so a card from yesterday 11pm
+  // doesn't get counted today.
+  const _now = new Date();
+  const todayCutoff = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate()).getTime();
 
   // Total counts every concept (Library cards live alongside drill cards now,
   // not in a separate compartment). Activity tiles count everything too.
@@ -9337,13 +9340,15 @@ function formatRelativeDate(iso) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
   const now = new Date();
-  const diffMs = now - d;
-  const diffDays = Math.floor(diffMs / 86400000);
+  // Calendar-day delta in local time, not rolling 24h. A card created at
+  // 11pm yesterday should be "Yesterday" at 10am today, not "Today".
+  const dStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const nStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const diffDays = Math.round((nStart - dStart) / 86400000);
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Yesterday';
   if (diffDays < 7) return `${diffDays}d ago`;
   if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-  // Older — show month + day (e.g. "Mar 12")
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
@@ -9421,7 +9426,15 @@ function renderConceptBrowse() {
   if (conceptBrowseTimeFilter) {
     const tf = CONCEPT_TIME_FILTERS.find(f => f.key === conceptBrowseTimeFilter);
     if (tf) {
-      const cutoff = Date.now() - tf.days * 86400000;
+      // For "Today", cut off at calendar midnight so 11pm-yesterday cards
+      // don't sneak in. For 7d/30d/90d, rolling N×24h is fine.
+      let cutoff;
+      if (tf.key === 'today') {
+        const _now = new Date();
+        cutoff = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate()).getTime();
+      } else {
+        cutoff = Date.now() - tf.days * 86400000;
+      }
       filtered = filtered.filter(c => {
         if (!c.createdAt) return false;
         const t = new Date(c.createdAt).getTime();
