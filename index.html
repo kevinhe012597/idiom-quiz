@@ -1907,9 +1907,10 @@ textarea { resize: vertical; min-height: 80px; }
 
   <!-- Dashboard Screen -->
   <div id="dashboard" class="screen">
-    <div class="header" style="position:relative;">
-      <button class="back" onclick="showScreen('module-select')" style="position:absolute; left:0; top:50%; transform:translateY(-50%);">&larr;</button>
+    <div class="header">
+      <button class="back" onclick="showScreen('module-select')">&larr;</button>
       <img src="/logo.svg" alt="Lexicon" style="height: 44px; width: auto;">
+      <div style="width:32px;"></div>
     </div>
     <div class="stats-grid bucket-grid">
       <div class="stat-card bucket-card" onclick="showBucket('nope')" style="cursor:pointer">
