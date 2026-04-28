@@ -3247,6 +3247,22 @@ function scheduleServerCardSync() {
   }, SERVER_SYNC_DEBOUNCE_MS);
 }
 
+// Merge two card arrays by id. For ids in both, LOCAL wins — the assumption
+// is the local copy has the just-made edit and is fresher. This prevents the
+// classic "two devices PUT a stale snapshot, last one clobbers earlier adds"
+// bug. (Deletes-on-one-device can resurrect from the other's stale state;
+// that's a known follow-up requiring tombstones.)
+function mergeCardArraysById(localArr, remoteArr) {
+  const byId = new Map();
+  for (const c of (remoteArr || [])) {
+    if (c && c.id) byId.set(c.id, c);
+  }
+  for (const c of (localArr || [])) {
+    if (c && c.id) byId.set(c.id, c); // local overrides remote on same id
+  }
+  return [...byId.values()];
+}
+
 async function flushServerCardSync() {
   if (!serverSyncReady) return;
 
@@ -3257,6 +3273,21 @@ async function flushServerCardSync() {
 
   serverSyncInFlight = true;
   try {
+    // Fetch the server's current state and merge by id before pushing.
+    // Without this step, two devices in flight will overwrite each other's adds.
+    let remoteCards = [];
+    try {
+      remoteCards = await fetchCardsFromServer();
+    } catch (e) {
+      console.warn('Card sync: remote fetch failed, pushing local-only:', e.message);
+    }
+    const merged = mergeCardArraysById(cards, remoteCards);
+    // Update local in-memory + localStorage to match merged set so the UI
+    // reflects any cards added on another device.
+    if (merged.length !== cards.length || !merged.every((c, i) => c.id === cards[i]?.id)) {
+      cards = merged;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
+    }
     const snapshot = cards.map(card => ({ ...card }));
     await pushCardsToServer(snapshot);
   } catch (err) {
@@ -3273,10 +3304,14 @@ async function flushServerCardSync() {
 async function syncCardsWithServerOnStartup() {
   try {
     const remoteCards = await fetchCardsFromServer();
-    if (remoteCards.length > 0) {
-      cards = remoteCards;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
-    } else if (cards.length > 0) {
+    // Merge by id rather than replace — local cards we haven't yet
+    // pushed (e.g. added offline) must survive startup reconcile.
+    const merged = mergeCardArraysById(cards, remoteCards);
+    cards = merged;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
+    // If the merge added remote cards or kept local-only, push the union
+    // so both sides are in agreement.
+    if (merged.length !== remoteCards.length) {
       await pushCardsToServer(cards);
     }
   } catch (err) {
@@ -3285,6 +3320,60 @@ async function syncCardsWithServerOnStartup() {
     serverSyncReady = true;
   }
 }
+
+// Pull-down sync: merge server state into local without pushing.
+// Triggered on window focus and on a 60s interval to catch additions
+// from other devices without waiting for our own next push.
+async function pullCardsFromServer() {
+  if (!serverSyncReady) return;
+  try {
+    const remoteCards = await fetchCardsFromServer();
+    const merged = mergeCardArraysById(cards, remoteCards);
+    // Only update local if something actually changed
+    const changed = merged.length !== cards.length ||
+      !merged.every((c, i) => c.id === cards[i]?.id);
+    if (changed) {
+      cards = merged;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
+      // Re-render anything that could be displaying the cards list
+      try { if (typeof renderBrowseList === 'function') renderBrowseList(); } catch {}
+      try { if (typeof updateDashboard === 'function') updateDashboard(); } catch {}
+    }
+  } catch (err) {
+    // Silent — pull failures are non-fatal
+  }
+}
+
+async function pullConceptsFromServer() {
+  try {
+    const r = await fetch(CONCEPTS_API_ENDPOINT, { cache: 'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    const remote = Array.isArray(data?.concepts) ? data.concepts : [];
+    const merged = mergeCardArraysById(concepts, remote);
+    const changed = merged.length !== concepts.length ||
+      !merged.every((c, i) => c.id === concepts[i]?.id);
+    if (changed) {
+      concepts.length = 0;
+      concepts.push(...merged);
+      localStorage.setItem(CONCEPTS_STORAGE_KEY, JSON.stringify(concepts));
+      try { if (typeof updateConceptsDashboard === 'function') updateConceptsDashboard(); } catch {}
+      try { if (typeof renderConceptBrowse === 'function') renderConceptBrowse(); } catch {}
+    }
+  } catch {}
+}
+
+// Wire up cross-device pull on focus + interval
+window.addEventListener('focus', () => {
+  pullCardsFromServer();
+  pullConceptsFromServer();
+});
+setInterval(() => {
+  if (document.visibilityState === 'visible') {
+    pullCardsFromServer();
+    pullConceptsFromServer();
+  }
+}, 60000);
 
 let cards = loadCards();
 initModelSelect();
@@ -7446,6 +7535,28 @@ async function flushServerConceptSync() {
   if (conceptSyncInFlight) { conceptSyncQueued = true; return; }
   conceptSyncInFlight = true;
   try {
+    // Same merge-by-id strategy as cards: GET remote, union with local
+    // (local wins on collision), PUT merged set. Prevents two devices from
+    // clobbering each other's concept adds.
+    let remoteConcepts = [];
+    try {
+      const r = await fetch(CONCEPTS_API_ENDPOINT, { cache: 'no-store' });
+      if (r.ok) {
+        const data = await r.json();
+        remoteConcepts = Array.isArray(data?.concepts) ? data.concepts : [];
+      }
+    } catch (e) {
+      console.warn('Concept sync: remote fetch failed, pushing local-only:', e.message);
+    }
+    const merged = mergeCardArraysById(concepts, remoteConcepts);
+    if (merged.length !== concepts.length || !merged.every((c, i) => c.id === concepts[i]?.id)) {
+      concepts.length = 0;
+      concepts.push(...merged);
+      localStorage.setItem(CONCEPTS_STORAGE_KEY, JSON.stringify(concepts));
+      // Re-render any concepts views that may be open
+      try { if (typeof updateConceptsDashboard === 'function') updateConceptsDashboard(); } catch {}
+      try { if (typeof renderConceptBrowse === 'function') renderConceptBrowse(); } catch {}
+    }
     await fetch(CONCEPTS_API_ENDPOINT, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
