@@ -804,9 +804,12 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        // Concept lookup uses OpenAI's Responses API + web_search_preview, which
-        // is OpenAI-only. Force an OpenAI model regardless of the user's selection.
-        const lookupModel = OPENAI_MODELS.has(pickModel(_body)) ? pickModel(_body) : DEFAULT_MODEL;
+        // Concept lookup needs web search. Two paths:
+        //   - User picked an Anthropic model → Anthropic Messages API + web_search_20250305 + tool_use for structured JSON
+        //   - User picked anything else → OpenAI Responses API + web_search_preview (existing path)
+        // Previously we always forced an OpenAI model, which made the homepage Sonnet selection silently get ignored here.
+        const userPickedAnthropic = !!(_body.model && ANTHROPIC_MODELS.has(_body.model));
+        const lookupModel = userPickedAnthropic ? _body.model : (OPENAI_MODELS.has(pickModel(_body)) ? pickModel(_body) : DEFAULT_MODEL);
 
         // APPEND MODE: user wants to ADD bullets without dropping existing ones.
         // We tell the model: here's what's already saved; generate ONLY new bullets
@@ -856,6 +859,88 @@ ${skillsBlock([
 
 ${existingTagsBlock(existingTags)}`;
 
+        const https = require('https');
+
+        // Path A: user picked Anthropic — use Messages API + native web_search + tool_use
+        if (userPickedAnthropic) {
+          const saveCardTool = {
+            name: 'save_concept_card',
+            description: 'Save the structured concept card after researching it.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                title: { type: 'string', description: 'Self-explanatory card title.' },
+                points: { type: 'array', items: { type: 'string' }, description: '5-7 bullets, first starts with "TL;DR: ".' },
+                tags: { type: 'array', items: { type: 'string' }, description: '1-2 tags from the existing tag list, or [] if none fit.' },
+              },
+              required: ['title', 'points', 'tags'],
+            },
+          };
+          const anthropicPayload = JSON.stringify({
+            model: lookupModel,
+            system: instructions,
+            messages: [{ role: 'user', content: `Look up: ${query}` }],
+            max_tokens: 4000,
+            tools: [
+              { type: 'web_search_20250305', name: 'web_search' },
+              saveCardTool,
+            ],
+            tool_choice: { type: 'auto' },
+          });
+          const anthropicOpts = {
+            hostname: 'api.anthropic.com',
+            path: '/v1/messages',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': ANTHROPIC_API_KEY,
+              'anthropic-version': '2023-06-01',
+              'Content-Length': Buffer.byteLength(anthropicPayload),
+            },
+          };
+          const aReq = https.request(anthropicOpts, (aRes) => {
+            let data = '';
+            aRes.on('data', chunk => { data += chunk; });
+            aRes.on('end', () => {
+              if (aRes.statusCode !== 200) {
+                console.error('concept-lookup Anthropic error:', aRes.statusCode, data.slice(0, 300));
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: `Anthropic API error (${aRes.statusCode})` }));
+                return;
+              }
+              try {
+                const parsed = JSON.parse(data);
+                // Find the save_concept_card tool_use block — that's the structured output
+                const toolUse = (parsed.content || []).find(b => b.type === 'tool_use' && b.name === 'save_concept_card');
+                let result;
+                if (toolUse && toolUse.input) {
+                  result = toolUse.input;
+                } else {
+                  // Fallback: concat all text blocks and try to JSON-parse
+                  const textParts = (parsed.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n').trim();
+                  const jsonStr = textParts.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+                  result = JSON.parse(jsonStr);
+                }
+                result._model = lookupModel;
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(result));
+              } catch (e) {
+                console.error('concept-lookup Anthropic parse error:', e.message, data.slice(0, 300));
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Failed to parse Anthropic response' }));
+              }
+            });
+          });
+          aReq.on('error', (err) => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+          aReq.write(anthropicPayload);
+          aReq.end();
+          return;
+        }
+
+        // Path B: OpenAI (existing behavior)
         const payload = JSON.stringify({
           model: lookupModel,
           instructions,
@@ -864,7 +949,6 @@ ${existingTagsBlock(existingTags)}`;
           temperature: 0.5
         });
 
-        const https = require('https');
         const options = {
           hostname: 'api.openai.com',
           path: '/v1/responses',
@@ -2200,20 +2284,57 @@ Only output valid JSON, nothing else.`
           return;
         }
 
-        // Sentiment bias — slider value mapped to a phrase the model can act on
-        const sentimentClause = (() => {
+        // Sentiment bias — placed at the TOP of the system prompt and the
+        // example list is tailored so the model can't pattern-match its way
+        // out of the filter. Earlier subtle phrasing was being ignored.
+        const POSITIVE_EXAMPLES = `Examples of the kind of words to consider:
+- earnest, sincere, candid, vulnerable, self-deprecating, self-effacing
+- magnanimous, gracious, generous-spirited, big-hearted, charitable
+- thoughtful, measured, considered, judicious, level-headed
+- warm, attentive, open, receptive, curious, engaged
+- enthusiastic, animated, spirited (in a flattering sense)`;
+        const NEGATIVE_EXAMPLES = `Examples of the kind of words to consider:
+- defensive, dismissive, deflective, evasive, condescending, patronizing
+- passive-aggressive, cutting, snide, sardonic, biting, barbed
+- gushing, fawning, sycophantic, obsequious, unctuous
+- hedging, equivocating, mealy-mouthed, weaselly, slippery
+- one-upping, point-scoring, smug, self-satisfied`;
+        const MIXED_EXAMPLES = `Examples of the kind of words to consider:
+- defensive, dismissive, deflective, condescending, patronizing
+- earnest, sincere, candid, vulnerable, self-deprecating
+- passive-aggressive, cutting, snide, sardonic
+- enthusiastic, gushing, effusive, fawning, sycophantic
+- hedging, equivocating, mealy-mouthed
+- magnanimous, gracious, generous-spirited`;
+
+        const sentimentDirective = (() => {
           switch (sentiment) {
             case 'strongly-positive':
-              return '\n\nSENTIMENT FILTER: Return ONLY warm, generous, or admiring words (e.g. earnest, magnanimous, gracious, candid, self-effacing). Skip anything ambivalent or critical.';
+              return {
+                rule: `MANDATORY SENTIMENT CONSTRAINT: Every single word you return MUST be flattering — warm, generous, admiring, or sympathetic in connotation. Reject any word that could be read as critical, unflattering, snide, defensive, or backhanded. If a word is even mildly negative, do not include it.`,
+                examples: POSITIVE_EXAMPLES,
+              };
             case 'lean-positive':
-              return '\n\nSENTIMENT FILTER: Lean toward positive / sympathetic words. About 4 of 5 should be warm or neutral-favorable. One mildly critical word is fine if it genuinely fits.';
+              return {
+                rule: `SENTIMENT CONSTRAINT: AT LEAST 4 of 5 words must be flattering (warm, generous, admiring, sympathetic). At most ONE may be mildly critical, and only if it genuinely fits. Do NOT default to a balanced mix.`,
+                examples: POSITIVE_EXAMPLES,
+              };
             case 'lean-negative':
-              return '\n\nSENTIMENT FILTER: Lean toward critical / unflattering words. About 4 of 5 should be unflattering, but include one that\'s neutral or sympathetic if it fits.';
+              return {
+                rule: `SENTIMENT CONSTRAINT: AT LEAST 4 of 5 words must be unflattering (critical, pointed, defensive, snide, evasive, etc.). At most ONE may be neutral or mildly positive. Do NOT default to a balanced mix.`,
+                examples: NEGATIVE_EXAMPLES,
+              };
             case 'strongly-negative':
-              return '\n\nSENTIMENT FILTER: Return ONLY unflattering, critical, or pointed words (e.g. defensive, dismissive, snide, sycophantic, mealy-mouthed). Skip anything neutral or sympathetic.';
+              return {
+                rule: `MANDATORY SENTIMENT CONSTRAINT: Every single word you return MUST be unflattering — critical, pointed, defensive, snide, evasive, or otherwise negative in connotation. Reject any word that is neutral, sympathetic, or admiring. If a word is even mildly positive, do not include it.`,
+                examples: NEGATIVE_EXAMPLES,
+              };
             case 'either':
             default:
-              return '\n\nSENTIMENT FILTER: Mix freely — include both flattering and unflattering interpretations of the moment if the wording supports it.';
+              return {
+                rule: `Sentiment: mix freely — include both flattering and unflattering interpretations if the moment supports it.`,
+                examples: MIXED_EXAMPLES,
+              };
           }
         })();
 
@@ -2224,15 +2345,13 @@ Only output valid JSON, nothing else.`
               role: 'system',
               content: `You are a vocabulary expert specializing in social and emotional language. Given a quote, an exchange between people, or a description of a moment, suggest 4-6 English words, idioms, or phrases that capture the TONE, DEMEANOR, or EMOTIONAL TEXTURE — how the speaker is being or how the dynamic feels.
 
-Examples of the kind of words you'd return:
-- defensive, dismissive, deflective, evasive, condescending, patronizing
-- earnest, sincere, candid, vulnerable, self-deprecating
-- passive-aggressive, cutting, snide, sardonic, biting
-- enthusiastic, gushing, effusive, fawning, sycophantic
-- hedging, equivocating, mealy-mouthed, weaselly
-- magnanimous, gracious, generous-spirited${sentimentClause}
+${sentimentDirective.rule}
+
+${sentimentDirective.examples}
 
 For each, provide the phrase, its category (word, phrase, or idiom), a concise meaning that explains the tone/dynamic, and a natural example sentence showing the word used to describe how someone is acting.
+
+Before finalizing, re-read your list and confirm every entry obeys the SENTIMENT CONSTRAINT above. Replace any that don't.
 
 Return ONLY valid JSON array with this exact shape: [{"phrase":"...","category":"...","meaning":"...","example":"..."}]`
             },
