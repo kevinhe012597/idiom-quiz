@@ -10018,8 +10018,9 @@ async function sendConceptLookupChat() {
 
   try {
     const response = await apiFetch('/api/followup-chat', { context, history: conceptLookupChatHistory, mode: 'concept' });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'API error');
+    let data = {};
+    try { data = await response.json(); } catch (_) { /* non-JSON body (502/HTML/etc) — leave data empty */ }
+    if (!response.ok) throw new Error(data.error || `Server error (HTTP ${response.status})`);
     const answer = data.answer || 'No response';
     conceptLookupChatHistory.push({ role: 'assistant', content: answer });
     typingEl.querySelector('.chatbot-msg-bubble').innerHTML = renderChatMarkdown(answer);
@@ -10051,8 +10052,9 @@ async function sendConceptViewChat() {
 
   try {
     const response = await apiFetch('/api/followup-chat', { context, history: conceptViewChatHistory, mode: 'concept' });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'API error');
+    let data = {};
+    try { data = await response.json(); } catch (_) { /* non-JSON body (502/HTML/etc) — leave data empty */ }
+    if (!response.ok) throw new Error(data.error || `Server error (HTTP ${response.status})`);
     const answer = data.answer || 'No response';
     conceptViewChatHistory.push({ role: 'assistant', content: answer });
     typingEl.querySelector('.chatbot-msg-bubble').innerHTML = renderChatMarkdown(answer);
@@ -10083,8 +10085,9 @@ async function sendConceptChat() {
 
   try {
     const response = await apiFetch('/api/followup-chat', { context, history: conceptChatHistory, mode: 'concept' });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'API error');
+    let data = {};
+    try { data = await response.json(); } catch (_) { /* non-JSON body (502/HTML/etc) — leave data empty */ }
+    if (!response.ok) throw new Error(data.error || `Server error (HTTP ${response.status})`);
     const answer = data.answer || 'No response';
     conceptChatHistory.push({ role: 'assistant', content: answer });
     typingEl.querySelector('.chatbot-msg-bubble').innerHTML = renderChatMarkdown(answer);
@@ -10112,8 +10115,9 @@ async function sendVocabChat() {
 
   try {
     const response = await apiFetch('/api/followup-chat', { context, history: vocabChatHistory, mode: 'vocab' });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'API error');
+    let data = {};
+    try { data = await response.json(); } catch (_) { /* non-JSON body (502/HTML/etc) — leave data empty */ }
+    if (!response.ok) throw new Error(data.error || `Server error (HTTP ${response.status})`);
     const answer = data.answer || 'No response';
     vocabChatHistory.push({ role: 'assistant', content: answer });
     messagesEl.innerHTML += `<div class="followup-msg assistant">${renderChatMarkdown(answer)}</div>`;

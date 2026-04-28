@@ -1036,7 +1036,11 @@ ${existingTagsBlock(existingTags)}`;
           model: 'claude-opus-4-20250514',
           system: systemPrompt,
           messages: claudeMessages,
-          max_tokens: 1500,  // generous budget so search results + answer fit
+          // Bumped from 1500 → 4000. Web-search responses can chain
+          // multiple search calls + reasoning + final answer; 1500 was
+          // hitting max_tokens and leaving stop_reason='tool_use' with
+          // no final text block, which surfaced as "API error" client-side.
+          max_tokens: 4000,
           tools: [{ type: 'web_search_20250305', name: 'web_search' }]
         };
         const payload = JSON.stringify(payloadObj);
@@ -1083,13 +1087,25 @@ ${existingTagsBlock(existingTags)}`;
                 if (block.type === 'text' && block.text) textParts.push(block.text.trim());
               }
               const answer = textParts.filter(Boolean).join(' ').trim();
-              if (!answer) throw new Error('Empty response');
+              if (!answer) {
+                // Detect the most common cause: stop_reason='max_tokens' or
+                // 'tool_use' meant the model didn't get to finalize its text.
+                const stopReason = parsed.stop_reason || 'unknown';
+                console.error('followup-chat empty answer; stop_reason=', stopReason, 'usage=', parsed.usage);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                  error: stopReason === 'max_tokens'
+                    ? 'Response cut off (hit token limit). Try a shorter question.'
+                    : `No text returned (stop_reason: ${stopReason}). Try rephrasing.`
+                }));
+                return;
+              }
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ answer }));
             } catch (e) {
               console.error('followup-chat parse error:', e.message, data.slice(0, 500));
               res.writeHead(500, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+              res.end(JSON.stringify({ error: 'Failed to parse response: ' + e.message }));
             }
           });
         });
