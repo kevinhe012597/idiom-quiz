@@ -861,6 +861,67 @@ ${existingTagsBlock(existingTags)}`;
 
         const https = require('https');
 
+        // OpenAI lookup runner — used both as the primary path when the user
+        // picked an OpenAI model AND as a fallback when Anthropic rate-limits.
+        function runOpenAILookup(model, fallbackNote) {
+          const payload = JSON.stringify({
+            model,
+            instructions,
+            input: query,
+            tools: [{ type: 'web_search_preview' }],
+            temperature: 0.5
+          });
+          const options = {
+            hostname: 'api.openai.com',
+            path: '/v1/responses',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${OPENAI_API_KEY}`,
+              'Content-Length': Buffer.byteLength(payload),
+            },
+          };
+          const apiReq = compatHttps.request(options, (apiRes) => {
+            let data = '';
+            apiRes.on('data', chunk => { data += chunk; });
+            apiRes.on('end', () => {
+              if (apiRes.statusCode !== 200) {
+                console.error('concept-lookup OpenAI error:', apiRes.statusCode, data.slice(0, 200));
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: `OpenAI API error (${apiRes.statusCode})` }));
+                return;
+              }
+              try {
+                const parsed = JSON.parse(data);
+                let content = '';
+                for (const item of parsed.output) {
+                  if (item.type === 'message' && item.content) {
+                    for (const block of item.content) {
+                      if (block.type === 'output_text') content += block.text;
+                    }
+                  }
+                }
+                content = content.trim();
+                const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+                const result = JSON.parse(jsonStr);
+                result._model = model;
+                if (fallbackNote) result._fallbackNote = fallbackNote;
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(result));
+              } catch (e) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Failed to parse response' }));
+              }
+            });
+          });
+          apiReq.on('error', (err) => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+          apiReq.write(payload);
+          apiReq.end();
+        }
+
         // Path A: user picked Anthropic — use Messages API + native web_search + tool_use
         if (userPickedAnthropic) {
           const saveCardTool = {
@@ -904,6 +965,14 @@ ${existingTagsBlock(existingTags)}`;
             aRes.on('end', () => {
               if (aRes.statusCode !== 200) {
                 console.error('concept-lookup Anthropic error:', aRes.statusCode, data.slice(0, 300));
+                // 429 rate limit (or any 5xx overload) → silently fall back to
+                // OpenAI so the user still gets an answer. Log so we can spot
+                // when it's happening too often.
+                if (aRes.statusCode === 429 || (aRes.statusCode >= 500 && aRes.statusCode < 600)) {
+                  console.log(`Falling back to OpenAI (${DEFAULT_MODEL}) due to Anthropic ${aRes.statusCode}`);
+                  runOpenAILookup(DEFAULT_MODEL, `Anthropic was rate-limited (${aRes.statusCode}); answered with ${DEFAULT_MODEL}.`);
+                  return;
+                }
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: `Anthropic API error (${aRes.statusCode})` }));
                 return;
@@ -940,64 +1009,8 @@ ${existingTagsBlock(existingTags)}`;
           return;
         }
 
-        // Path B: OpenAI (existing behavior)
-        const payload = JSON.stringify({
-          model: lookupModel,
-          instructions,
-          input: query,
-          tools: [{ type: 'web_search_preview' }],
-          temperature: 0.5
-        });
-
-        const options = {
-          hostname: 'api.openai.com',
-          path: '/v1/responses',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'Content-Length': Buffer.byteLength(payload),
-          },
-        };
-
-        const apiReq = compatHttps.request(options, (apiRes) => {
-          let data = '';
-          apiRes.on('data', chunk => { data += chunk; });
-          apiRes.on('end', () => {
-            if (apiRes.statusCode !== 200) {
-              res.writeHead(500, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'OpenAI API error' }));
-              return;
-            }
-            try {
-              const parsed = JSON.parse(data);
-              // Responses API: extract text from output array
-              let content = '';
-              for (const item of parsed.output) {
-                if (item.type === 'message' && item.content) {
-                  for (const block of item.content) {
-                    if (block.type === 'output_text') content += block.text;
-                  }
-                }
-              }
-              content = content.trim();
-              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-              const result = JSON.parse(jsonStr);
-              result._model = lookupModel;
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify(result));
-            } catch (e) {
-              res.writeHead(500, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'Failed to parse response' }));
-            }
-          });
-        });
-        apiReq.on('error', (err) => {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: err.message }));
-        });
-        apiReq.write(payload);
-        apiReq.end();
+        // Path B: OpenAI primary path (when user picked an OpenAI model)
+        runOpenAILookup(lookupModel, null);
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
