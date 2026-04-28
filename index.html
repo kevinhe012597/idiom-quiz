@@ -7174,13 +7174,11 @@ function updateConceptsDashboard() {
   const weekCutoff = Date.now() - 7 * 86400000;
   const todayCutoff = Date.now() - 1 * 86400000;
 
-  // Total = drillable concepts (excludes library, which lives separately).
-  // This week / Added today still count both, since they're activity signals.
+  // Total counts every concept (Library cards live alongside drill cards now,
+  // not in a separate compartment). Activity tiles count everything too.
   let weekCount = 0;
   let todayCount = 0;
-  let totalDrillable = 0;
   concepts.forEach(c => {
-    if (c.bucket !== 'library') totalDrillable++;
     if (c.createdAt) {
       const t = new Date(c.createdAt).getTime();
       if (!isNaN(t) && t >= weekCutoff) weekCount++;
@@ -7191,16 +7189,15 @@ function updateConceptsDashboard() {
   const totalEl = document.getElementById('kb-total');
   const weekEl = document.getElementById('kb-week');
   const todayEl = document.getElementById('kb-today');
-  if (totalEl) totalEl.textContent = totalDrillable;
+  if (totalEl) totalEl.textContent = concepts.length;
   if (weekEl) weekEl.textContent = weekCount;
   if (todayEl) todayEl.textContent = todayCount;
 
   // Recently added — sort by createdAt desc, take top 5.
-  // Excludes Library cards so this list reflects the drill deck only.
   const recentList = document.getElementById('kb-recent-list');
   if (recentList) {
     const recent = [...concepts]
-      .filter(c => c.createdAt && c.bucket !== 'library')
+      .filter(c => c.createdAt)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 5);
     if (recent.length === 0) {
@@ -7286,10 +7283,12 @@ function renderLibraryIndex() {
   if (!list) return;
   const query = (document.getElementById('library-search')?.value || '').trim().toLowerCase();
 
-  // Group library-bucketed concepts by source
+  // Group Library concepts by source. A card belongs to Library if
+  // c.inLibrary === true (set when saved via the extraction preview).
+  // Cards can be in BOTH Library and the drill rotation.
   const bySource = new Map();
   for (const c of concepts) {
-    if (c.bucket !== 'library') continue;
+    if (!c.inLibrary) continue;
     const key = (c.source || 'Untitled source').trim() || 'Untitled source';
     if (!bySource.has(key)) bySource.set(key, []);
     bySource.get(key).push(c);
@@ -7331,7 +7330,7 @@ let libraryEntrySource = null;
 
 function openLibraryEntry(source) {
   libraryEntrySource = source;
-  const cards = concepts.filter(c => c.bucket === 'library' && (c.source || '').trim() === source).sort((a, b) => {
+  const cards = concepts.filter(c => c.inLibrary && (c.source || '').trim() === source).sort((a, b) => {
     return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
   });
 
@@ -8076,29 +8075,35 @@ function getPointsFromEditor(cardIndex) {
     .filter(Boolean);
 }
 
-function toggleConceptDestination(i) {
+function _renderDrillPill(i) {
   const r = conceptQuickResults[i];
-  if (!r) return;
-  r.destination = r.destination === 'drill' ? 'library' : 'drill';
   const btn = document.getElementById(`cq-dest-${i}`);
-  if (!btn) return;
-  const isDrill = r.destination === 'drill';
-  btn.textContent = isDrill ? '🎯 Drill' : '📚 Library';
-  btn.title = isDrill ? 'Click to send to Library' : 'Click to send to Drill rotation';
-  btn.style.background = isDrill ? 'var(--accent)' : 'rgba(139,92,246,0.15)';
-  btn.style.color = isDrill ? '#fff' : 'var(--concept)';
+  if (!r || !btn) return;
+  const drillOn = r.alsoDrill === true;
+  btn.textContent = `🎯 ${drillOn ? 'Also drill' : 'Also drill?'}`;
+  btn.title = drillOn ? 'Remove from drill rotation' : 'Also add to drill rotation';
+  if (drillOn) {
+    btn.style.background = 'var(--accent)';
+    btn.style.color = '#fff';
+    btn.style.border = 'none';
+  } else {
+    btn.style.background = 'transparent';
+    btn.style.color = 'var(--text-dim)';
+    btn.style.border = '1px solid var(--surface2)';
+  }
 }
 
-function setAllConceptDestinations(dest) {
+function toggleConceptDrill(i) {
+  const r = conceptQuickResults[i];
+  if (!r) return;
+  r.alsoDrill = !r.alsoDrill;
+  _renderDrillPill(i);
+}
+
+function setAllConceptDrill(on) {
   conceptQuickResults.forEach((r, i) => {
-    r.destination = dest;
-    const btn = document.getElementById(`cq-dest-${i}`);
-    if (!btn) return;
-    const isDrill = dest === 'drill';
-    btn.textContent = isDrill ? '🎯 Drill' : '📚 Library';
-    btn.title = isDrill ? 'Click to send to Library' : 'Click to send to Drill rotation';
-    btn.style.background = isDrill ? 'var(--accent)' : 'rgba(139,92,246,0.15)';
-    btn.style.color = isDrill ? '#fff' : 'var(--concept)';
+    r.alsoDrill = !!on;
+    _renderDrillPill(i);
   });
 }
 
@@ -8107,8 +8112,8 @@ function conceptQuickConfirm() {
   const now = new Date().toISOString();
   const batchSource = document.getElementById('cq-batch-source').value.trim() || 'Import';
   const existingTitles = new Set(concepts.map(c => c.title.toLowerCase()));
-  let toLibrary = 0;
-  let toDrill = 0;
+  let totalSaved = 0;
+  let alsoDrillCount = 0;
   let firstLibraryCard = null;
 
   conceptQuickResults.forEach((r, i) => {
@@ -8124,7 +8129,11 @@ function conceptQuickConfirm() {
     const titleInput = document.getElementById(`cq-title-${i}`);
     const editedTitle = titleInput ? titleInput.value.trim() : (r.title || '');
     const editedValue = getValueSelector(`cq-value-${i}`) || undefined;
-    const isLibrary = (r.destination || 'library') === 'library';
+    // Every extracted card lives in 📚 Library. The "Also drill" toggle decides
+    // whether it ALSO joins the daily drill rotation. bucket controls drill:
+    //   alsoDrill === true  → bucket: undefined (drillable + in Library)
+    //   alsoDrill === false → bucket: 'library' (Library only, drill skips)
+    const alsoDrill = r.alsoDrill === true;
     const newCard = {
       id: generateId(),
       title: editedTitle,
@@ -8139,29 +8148,25 @@ function conceptQuickConfirm() {
       repetitions: 0,
       nextReview: today,
       lastReview: null,
-      bucket: isLibrary ? 'library' : undefined,
+      bucket: alsoDrill ? undefined : 'library',
+      inLibrary: true,
       createdAt: now
     };
     concepts.unshift(newCard);
-    if (isLibrary) {
-      toLibrary++;
-      if (!firstLibraryCard) firstLibraryCard = newCard;
-    } else {
-      toDrill++;
-    }
+    totalSaved++;
+    if (alsoDrill) alsoDrillCount++;
+    if (!firstLibraryCard) firstLibraryCard = newCard;
   });
 
   saveConcepts(concepts);
 
-  // Build a clear toast: "Saved 5 to Library, 2 to drill" — drop empty arms
-  const toastParts = [];
-  if (toLibrary) toastParts.push(`${toLibrary} to 📚 Library`);
-  if (toDrill) toastParts.push(`${toDrill} to 🎯 Drill`);
-  showToast(toastParts.length ? `Saved ${toastParts.join(', ')}` : 'Nothing saved');
+  const toastMsg = totalSaved
+    ? `Saved ${totalSaved} to 📚 Library${alsoDrillCount ? ` (${alsoDrillCount} also in 🎯 Drill)` : ''}`
+    : 'Nothing saved';
+  showToast(toastMsg);
 
   conceptQuickReset();
 
-  // Land on the just-saved Library entry if any went there; otherwise dashboard
   if (firstLibraryCard) {
     openLibraryEntry(firstLibraryCard.source);
   } else {
@@ -8452,15 +8457,15 @@ function renderConceptExtractionResults(results, suggestedSource, sourceFallback
     }
   }
 
-  // Initialize per-card destination state (📚 Library by default).
-  // The user can flip individual cards to 🎯 Drill before saving.
-  results.forEach(r => { if (!r.destination) r.destination = 'library'; });
+  // Every extracted card lands in 📚 Library. The "Also drill" toggle is
+  // an opt-in to ALSO add the card to the daily drill rotation.
+  results.forEach(r => { if (typeof r.alsoDrill !== 'boolean') r.alsoDrill = false; });
 
   const destBanner = `
     <div style="margin-bottom:10px; padding:10px 12px; background:rgba(139,92,246,0.06); border:1px dashed var(--surface2); border-radius:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-      <span style="font-size:0.78rem; color:var(--text-dim); flex:1; min-width:200px;">Default: <strong style="color:var(--concept);">📚 Library</strong>. Tap a card's 🎯 to promote it to the drill rotation.</span>
-      <button onclick="setAllConceptDestinations('library')" class="btn-secondary" style="width:auto; padding:5px 10px; font-size:0.72rem; white-space:nowrap;">Set all 📚</button>
-      <button onclick="setAllConceptDestinations('drill')" class="btn-secondary" style="width:auto; padding:5px 10px; font-size:0.72rem; white-space:nowrap;">Set all 🎯</button>
+      <span style="font-size:0.78rem; color:var(--text-dim); flex:1; min-width:200px;">All cards saved to <strong style="color:var(--concept);">📚 Library</strong>. Tap <strong style="color:var(--accent);">🎯 Also drill</strong> on any card you also want in the daily drill rotation.</span>
+      <button onclick="setAllConceptDrill(false)" class="btn-secondary" style="width:auto; padding:5px 10px; font-size:0.72rem; white-space:nowrap;">Drill: none</button>
+      <button onclick="setAllConceptDrill(true)" class="btn-secondary" style="width:auto; padding:5px 10px; font-size:0.72rem; white-space:nowrap;">Drill: all</button>
     </div>`;
 
   preview.innerHTML = metaLine + destBanner +
@@ -8468,13 +8473,13 @@ function renderConceptExtractionResults(results, suggestedSource, sourceFallback
     results.map((r, i) => {
       const cleanPoints = (r.points || []).map(p => p.replace(/^[•\-–—]\s*/, ''));
       const isDupe = existingTitles.has((r.title || '').toLowerCase());
-      const isDrill = r.destination === 'drill';
-      const destPill = `<button onclick="toggleConceptDestination(${i})" id="cq-dest-${i}" title="${isDrill ? 'Click to send to Library' : 'Click to send to Drill rotation'}" style="border:none; cursor:pointer; padding:4px 10px; border-radius:12px; font-size:0.72rem; font-weight:700; white-space:nowrap; ${isDrill ? 'background:var(--accent); color:#fff;' : 'background:rgba(139,92,246,0.15); color:var(--concept);'}">${isDrill ? '🎯 Drill' : '📚 Library'}</button>`;
+      const drillOn = r.alsoDrill === true;
+      const drillPill = `<button onclick="toggleConceptDrill(${i})" id="cq-dest-${i}" title="${drillOn ? 'Remove from drill rotation' : 'Also add to drill rotation'}" style="border:none; cursor:pointer; padding:4px 10px; border-radius:12px; font-size:0.72rem; font-weight:700; white-space:nowrap; ${drillOn ? 'background:var(--accent); color:#fff;' : 'background:transparent; color:var(--text-dim); border:1px solid var(--surface2);'}">🎯 ${drillOn ? 'Also drill' : 'Also drill?'}</button>`;
       return `<div class="concept-card" style="margin-bottom:12px; ${isDupe ? 'opacity:0.5;' : ''}">
         <div style="display:flex; align-items:center; gap:8px;">
           <input type="checkbox" id="cq-check-${i}" ${isDupe ? '' : 'checked'} style="width:18px; height:18px; accent-color:var(--concept);">
           <input type="text" id="cq-title-${i}" value="${escapeHtml(r.title || '')}" style="flex:1; font-size:1.05rem; font-weight:700; color:var(--text); border:1px solid var(--surface2); border-radius:6px; padding:3px 8px; background:var(--surface); font-family:inherit;">
-          ${destPill}
+          ${drillPill}
           ${isDupe ? '<span class="dupe-tag">duplicate</span>' : ''}
         </div>
         <textarea id="cq-points-${i}" rows="${Math.max(3, cleanPoints.length + 1)}" style="width:100%; margin-top:8px; padding:8px 10px; font-size:0.85rem; line-height:1.6; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;">${cleanPoints.map(p => '• ' + escapeHtml(p)).join('\n')}</textarea>
