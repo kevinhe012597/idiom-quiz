@@ -2598,6 +2598,7 @@ textarea { resize: vertical; min-height: 80px; }
   <div class="dashboard-actions">
     <button class="btn-primary concept-btn" onclick="showScreen('concept-lookup')" style="font-size:1rem;">Look Up a Concept</button>
     <button class="btn-primary" onclick="openConceptDrillDialog()">Recall Drill</button>
+    <button class="btn-secondary" onclick="showKnowledgeChat()">💬 Chat with my knowledge</button>
     <button class="btn-secondary" onclick="conceptBrowseByBucket(null)">Browse Concepts</button>
     <button class="btn-secondary" onclick="showLibrary()">📚 Library</button>
     <button class="btn-secondary" onclick="showConceptAddForm()">Add Concepts</button>
@@ -3095,6 +3096,33 @@ textarea { resize: vertical; min-height: 80px; }
   </div>
 
   <button id="dossier-edit-delete-btn" onclick="dossierDeleteEntity()" class="btn-secondary" style="margin-top:24px; width:100%; color:var(--red); border-color:rgba(239,68,68,0.4); display:none;">🗑 Delete this entity</button>
+</div>
+
+<!-- ─── KNOWLEDGE CHAT (RAG over concepts + library + dossier) ─────────── -->
+<div id="knowledge-chat" class="screen">
+  <div class="header">
+    <button class="back" onclick="showScreen('concepts-dashboard')">&larr;</button>
+    <h2 style="color:var(--concept);">💬 Chat with my knowledge</h2>
+    <button onclick="resetKnowledgeChat()" style="background:none; border:none; color:var(--text-dim); font-size:0.85rem; cursor:pointer;" title="Clear conversation">↻ New</button>
+  </div>
+  <div style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;" id="kc-scope-row">
+    <span style="font-size:0.7rem; color:var(--text-dim); align-self:center; text-transform:uppercase; font-weight:600; letter-spacing:0.05em;">Scope:</span>
+    <button onclick="setKnowledgeChatScope('all')" data-scope="all" class="concept-tag kc-scope-btn" style="cursor:pointer; border:none; padding:5px 10px; font-size:0.75rem;">All</button>
+    <button onclick="setKnowledgeChatScope('concepts')" data-scope="concepts" class="concept-tag kc-scope-btn" style="cursor:pointer; border:none; padding:5px 10px; font-size:0.75rem;">Concepts</button>
+    <button onclick="setKnowledgeChatScope('library')" data-scope="library" class="concept-tag kc-scope-btn" style="cursor:pointer; border:none; padding:5px 10px; font-size:0.75rem;">Library</button>
+    <button onclick="setKnowledgeChatScope('dossier')" data-scope="dossier" class="concept-tag kc-scope-btn" style="cursor:pointer; border:none; padding:5px 10px; font-size:0.75rem;">Dossier</button>
+  </div>
+  <div id="kc-messages" style="display:flex; flex-direction:column; gap:10px; min-height:200px; padding:14px; background:var(--surface1); border-radius:12px; margin-bottom:10px;">
+    <div id="kc-empty" style="text-align:center; color:var(--text-dim); font-size:0.9rem; line-height:1.55; padding:20px 12px;">
+      💭 Ask anything about your saved knowledge.<br>
+      <span style="font-size:0.78rem;">Try: <em>"what did Henry tell me about AI infra?"</em> or <em>"what was that LLMs-as-OS framing?"</em></span>
+    </div>
+  </div>
+  <div style="display:flex; gap:6px;">
+    <textarea id="kc-input" rows="2" placeholder="Ask anything about your knowledge base..." onkeydown="if(event.key==='Enter' && !event.shiftKey && !event.metaKey){event.preventDefault(); sendKnowledgeChat();}" style="flex:1; padding:10px 12px; font-size:0.92rem; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
+    <button onclick="sendKnowledgeChat()" id="kc-send-btn" class="btn-primary concept-btn" style="width:auto; padding:8px 18px;">Send</button>
+  </div>
+  <p style="font-size:0.7rem; color:var(--text-dim); margin-top:6px; text-align:center;">Your saved notes get embedded by OpenAI to enable search. Stored privately on your Railway DB.</p>
 </div>
 
 <!-- Concept View (read-only card view) -->
@@ -8767,6 +8795,171 @@ function dossierDeleteEntity() {
   showToast('Deleted');
   showScreen('dossier-dashboard');
   updateDossierDashboard();
+}
+
+// ─── KNOWLEDGE CHAT (RAG) ────────────────────────────────────────────────
+// Conversation persists across sessions via localStorage. Click on [Title]
+// citation chips to navigate to the underlying source (concept/library/dossier).
+
+const KC_HISTORY_KEY = 'lexicon-kc-history';
+const KC_SCOPE_KEY = 'lexicon-kc-scope';
+let kcHistory = (() => {
+  try {
+    const stored = localStorage.getItem(KC_HISTORY_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+})();
+let kcScope = localStorage.getItem(KC_SCOPE_KEY) || 'all';
+
+function showKnowledgeChat() {
+  showScreen('knowledge-chat');
+  setKnowledgeChatScope(kcScope, true);
+  renderKnowledgeChat();
+}
+
+function setKnowledgeChatScope(scope, skipRender) {
+  kcScope = scope;
+  localStorage.setItem(KC_SCOPE_KEY, scope);
+  document.querySelectorAll('.kc-scope-btn').forEach(btn => {
+    if (btn.dataset.scope === scope) {
+      btn.style.background = 'var(--concept)';
+      btn.style.color = '#fff';
+    } else {
+      btn.style.background = '';
+      btn.style.color = '';
+      btn.style.opacity = '0.6';
+    }
+  });
+}
+
+function resetKnowledgeChat() {
+  if (kcHistory.length === 0) return;
+  if (!confirm('Clear this conversation?')) return;
+  kcHistory = [];
+  localStorage.removeItem(KC_HISTORY_KEY);
+  renderKnowledgeChat();
+}
+
+function renderKnowledgeChat() {
+  const container = document.getElementById('kc-messages');
+  if (!container) return;
+  if (kcHistory.length === 0) {
+    container.innerHTML = `<div id="kc-empty" style="text-align:center; color:var(--text-dim); font-size:0.9rem; line-height:1.55; padding:20px 12px;">
+      💭 Ask anything about your saved knowledge.<br>
+      <span style="font-size:0.78rem;">Try: <em>"what did Henry tell me about AI infra?"</em> or <em>"what was that LLMs-as-OS framing?"</em></span>
+    </div>`;
+    return;
+  }
+  container.innerHTML = kcHistory.map(msg => {
+    if (msg.role === 'user') {
+      return `<div style="align-self:flex-end; max-width:85%; padding:8px 12px; background:var(--accent); color:#fff; border-radius:14px 14px 2px 14px; font-size:0.92rem; line-height:1.5;">${escapeHtml(msg.content)}</div>`;
+    }
+    // assistant
+    if (msg.error) {
+      return `<div style="align-self:flex-start; max-width:90%; padding:8px 12px; color:var(--red); font-size:0.88rem;">Error: ${escapeHtml(msg.error)}</div>`;
+    }
+    const answerHtml = renderKnowledgeChatAnswer(msg.content || '', msg.citations || []);
+    return `<div style="align-self:flex-start; max-width:92%; padding:10px 14px; background:var(--surface); border:1px solid var(--surface2); border-radius:14px 14px 14px 2px; font-size:0.92rem; line-height:1.6;">${answerHtml}</div>`;
+  }).join('');
+  container.scrollTop = container.scrollHeight;
+}
+
+// Convert [Title]-style markers in the model's answer into clickable citation
+// chips that route to the actual source view. We match each [Foo] segment
+// against the citations list (case-insensitive title match) and only chipify
+// if it actually corresponds to a known source.
+function renderKnowledgeChatAnswer(answer, citations) {
+  if (!citations || citations.length === 0) {
+    return renderPoint(answer);
+  }
+  // Build a case-insensitive map of normalized title → citation
+  const byTitle = new Map();
+  for (const c of citations) {
+    const key = (c.title || '').toLowerCase().trim();
+    if (key && !byTitle.has(key)) byTitle.set(key, c);
+  }
+  // Replace [Foo] with a clickable chip if Foo matches a citation title
+  const chipified = answer.replace(/\[([^\]]+)\]/g, (full, label) => {
+    const key = (label || '').toLowerCase().trim();
+    const c = byTitle.get(key);
+    if (!c) return full;
+    return `<button onclick="kcOpenCitation('${c.type}', ${JSON.stringify(c.sourceId).replace(/"/g, '&quot;')})" style="display:inline-block; padding:1px 8px; margin:0 2px; border:1px solid var(--concept); background:rgba(139,92,246,0.1); color:var(--concept); border-radius:8px; font-size:0.82rem; font-weight:600; cursor:pointer;">${escapeHtml(label)}</button>`;
+  });
+  return renderPoint(chipified);
+}
+
+function kcOpenCitation(type, sourceId) {
+  if (type === 'concept') {
+    if (typeof viewConcept === 'function') viewConcept(sourceId);
+    return;
+  }
+  if (type === 'dossier_entity') {
+    if (typeof openDossierEntity === 'function') openDossierEntity(sourceId);
+    return;
+  }
+  if (type === 'dossier_note') {
+    const [entityId] = (sourceId || '').split('/');
+    if (typeof openDossierEntity === 'function' && entityId) openDossierEntity(entityId);
+    return;
+  }
+}
+
+async function sendKnowledgeChat() {
+  const input = document.getElementById('kc-input');
+  const question = (input.value || '').trim();
+  if (!question) { showToast('Type a question first'); return; }
+  const sendBtn = document.getElementById('kc-send-btn');
+
+  // Append user message immediately
+  kcHistory.push({ role: 'user', content: question });
+  input.value = '';
+  // Append a placeholder assistant message that we'll fill in
+  const placeholderIdx = kcHistory.length;
+  kcHistory.push({ role: 'assistant', content: 'Thinking…', loading: true });
+  renderKnowledgeChat();
+  localStorage.setItem(KC_HISTORY_KEY, JSON.stringify(kcHistory));
+
+  sendBtn.disabled = true;
+
+  try {
+    // Build short history to send (exclude the in-flight placeholder).
+    // Anthropic format: only role + content strings, no extras.
+    const history = kcHistory.slice(0, placeholderIdx - 1).map(m => ({
+      role: m.role,
+      content: m.role === 'assistant' && m.citations
+        ? (m.content || '')
+        : m.content,
+    }));
+    const resp = await apiFetch('/api/knowledge-chat', {
+      question,
+      history,
+      scope: kcScope,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    kcHistory[placeholderIdx] = {
+      role: 'assistant',
+      content: data.answer || '',
+      citations: data.citations || [],
+    };
+  } catch (err) {
+    kcHistory[placeholderIdx] = {
+      role: 'assistant',
+      content: '',
+      error: err.message || 'Unknown error',
+    };
+  } finally {
+    sendBtn.disabled = false;
+    renderKnowledgeChat();
+    localStorage.setItem(KC_HISTORY_KEY, JSON.stringify(kcHistory));
+  }
 }
 
 // ─── Concept Lookup ─────────────────────────────────────────────────────

@@ -673,7 +673,7 @@ if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
-const db = new DatabaseSync(DB_PATH);
+const db = new DatabaseSync(DB_PATH, { allowExtension: true });
 db.exec(`
 CREATE TABLE IF NOT EXISTS app_state (
   key TEXT PRIMARY KEY,
@@ -689,6 +689,301 @@ ON CONFLICT(key) DO UPDATE SET
   value = excluded.value,
   updated_at = excluded.updated_at
 `);
+
+// ─── Embeddings table (RAG) ────────────────────────────────────────────────
+// Stores 1536-dim float32 vectors for concept cards, dossier entities, and
+// dossier notes. Used by /api/knowledge-chat to retrieve relevant context.
+db.exec(`
+CREATE TABLE IF NOT EXISTS embeddings (
+  id              TEXT PRIMARY KEY,
+  source_type     TEXT NOT NULL,
+  source_id       TEXT NOT NULL,
+  content         TEXT NOT NULL,
+  content_hash    TEXT NOT NULL,
+  embedding       BLOB NOT NULL,
+  embedding_model TEXT NOT NULL,
+  embedded_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_emb_source ON embeddings(source_type, source_id);
+`);
+const selectEmbeddingByIdStmt = db.prepare('SELECT id, content_hash FROM embeddings WHERE id = ?');
+const upsertEmbeddingStmt = db.prepare(`
+INSERT INTO embeddings (id, source_type, source_id, content, content_hash, embedding, embedding_model, embedded_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  content = excluded.content,
+  content_hash = excluded.content_hash,
+  embedding = excluded.embedding,
+  embedding_model = excluded.embedding_model,
+  embedded_at = excluded.embedded_at
+`);
+const deleteEmbeddingStmt = db.prepare('DELETE FROM embeddings WHERE id = ?');
+const deleteEmbeddingsByPrefixStmt = db.prepare("DELETE FROM embeddings WHERE id LIKE ?");
+const selectAllEmbeddingsByScopeStmt = db.prepare(
+  'SELECT id, source_type, source_id, content, embedding FROM embeddings WHERE source_type IN (SELECT value FROM json_each(?))'
+);
+const selectAllExistingEmbIdsStmt = db.prepare('SELECT id, content_hash FROM embeddings');
+
+// Try to load sqlite-vec extension (optional, falls back to JS cosine).
+let useVecExt = false;
+try {
+  const sqliteVec = require('sqlite-vec');
+  if (sqliteVec && typeof sqliteVec.load === 'function') {
+    sqliteVec.load(db);
+    useVecExt = true;
+    console.log('sqlite-vec loaded — using native vector search');
+  } else if (sqliteVec && sqliteVec.loadablePath && typeof db.loadExtension === 'function') {
+    db.loadExtension(sqliteVec.loadablePath());
+    useVecExt = true;
+    console.log('sqlite-vec loaded via loadExtension — using native vector search');
+  }
+} catch (e) {
+  console.warn('sqlite-vec unavailable; falling back to JS cosine similarity:', e.message);
+}
+
+// ─── Embedding helpers ─────────────────────────────────────────────────────
+const crypto = require('crypto');
+const EMBEDDING_MODEL = 'text-embedding-3-small';
+const EMBEDDING_DIMS = 1536;
+
+function sha1(s) { return crypto.createHash('sha1').update(s).digest('hex'); }
+function float32ToBlob(arr) { return Buffer.from(new Float32Array(arr).buffer); }
+function blobToFloat32(buf) { return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4); }
+function cosineSim(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  const len = a.length;
+  for (let i = 0; i < len; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  const denom = Math.sqrt(na) * Math.sqrt(nb);
+  return denom > 0 ? dot / denom : 0;
+}
+
+// Batch-embed an array of strings via OpenAI /v1/embeddings.
+// Returns array of Float32Array vectors in the same order.
+async function embedTexts(texts) {
+  if (!Array.isArray(texts) || texts.length === 0) return [];
+  if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not set — cannot embed');
+  const payload = JSON.stringify({ model: EMBEDDING_MODEL, input: texts });
+  return new Promise((resolve, reject) => {
+    const httpsLib = require('https');
+    const req = httpsLib.request({
+      hostname: 'api.openai.com',
+      path: '/v1/embeddings',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (resp) => {
+      let data = '';
+      resp.on('data', c => { data += c; });
+      resp.on('end', () => {
+        if (resp.statusCode !== 200) {
+          return reject(new Error(`OpenAI embeddings ${resp.statusCode}: ${data.slice(0, 200)}`));
+        }
+        try {
+          const parsed = JSON.parse(data);
+          const vectors = (parsed.data || [])
+            .sort((a, b) => a.index - b.index)
+            .map(d => new Float32Array(d.embedding));
+          resolve(vectors);
+        } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+// Build the canonical content string for each retrieval unit. The exact text
+// drives the content_hash — small tweaks here force re-embed of everything.
+function buildConceptContent(c) {
+  const points = (c.points || []).map(p => p.replace(/^[•\-–—]\s*/, '').trim()).filter(Boolean);
+  return [c.title || '', ...points].filter(Boolean).join('\n');
+}
+function buildDossierEntityContent(e) {
+  const parts = [e.name];
+  if (e.type === 'person') {
+    if (e.role) parts.push(`Role: ${e.role}`);
+    if (e.firm) parts.push(`Firm: ${e.firm}`);
+    if (e.location) parts.push(`Location: ${e.location}`);
+    if (e.howIMet) parts.push(`How met: ${e.howIMet}`);
+  } else {
+    if (e.sector) parts.push(`Sector: ${e.sector}`);
+    if (e.hq) parts.push(`HQ: ${e.hq}`);
+    if (e.size) parts.push(`Size: ${e.size}`);
+  }
+  if (e.categories && e.categories.length) parts.push(`Categories: ${e.categories.join(', ')}`);
+  return parts.filter(Boolean).join('\n');
+}
+function buildDossierNoteContent(entity, note) {
+  const date = note.createdAt ? new Date(note.createdAt).toISOString().slice(0, 10) : '';
+  const src = note.source ? ` (${note.source})` : '';
+  return `${entity.name} · ${date}${src}\n${note.body || ''}`;
+}
+
+// Read concepts + dossier from app_state and return the full set of
+// {id, sourceType, sourceId, content, contentHash} units to be embedded.
+function collectAllRetrievalUnits() {
+  const units = [];
+  try {
+    const cRow = selectAppStateStmt.get('concepts');
+    const concepts = cRow && cRow.value ? JSON.parse(cRow.value) : [];
+    for (const c of (Array.isArray(concepts) ? concepts : [])) {
+      if (!c || !c.id) continue;
+      const content = buildConceptContent(c);
+      if (!content || content.trim().length < 3) continue;
+      units.push({
+        id: `concept:${c.id}`,
+        sourceType: 'concept',
+        sourceId: c.id,
+        content,
+        contentHash: sha1(content),
+      });
+    }
+  } catch (e) { console.warn('collect concepts failed:', e.message); }
+  try {
+    const dRow = selectAppStateStmt.get('dossier_entities');
+    const ents = dRow && dRow.value ? JSON.parse(dRow.value) : [];
+    for (const e of (Array.isArray(ents) ? ents : [])) {
+      if (!e || !e.id) continue;
+      const profileContent = buildDossierEntityContent(e);
+      if (profileContent && profileContent.trim().length >= 3) {
+        units.push({
+          id: `dossier:${e.id}`,
+          sourceType: 'dossier_entity',
+          sourceId: e.id,
+          content: profileContent,
+          contentHash: sha1(profileContent),
+        });
+      }
+      for (const n of (e.notes || [])) {
+        if (!n || !n.id || !n.body || n.body.trim().length < 3) continue;
+        const noteContent = buildDossierNoteContent(e, n);
+        units.push({
+          id: `note:${e.id}/${n.id}`,
+          sourceType: 'dossier_note',
+          sourceId: `${e.id}/${n.id}`,
+          content: noteContent,
+          contentHash: sha1(noteContent),
+        });
+      }
+    }
+  } catch (e) { console.warn('collect dossier failed:', e.message); }
+  return units;
+}
+
+// Idempotent backfill: walks all retrieval units, embeds anything new or
+// content-changed (skips unchanged via content_hash), drops stale rows.
+let backfillInFlight = false;
+async function runEmbedBackfill() {
+  if (backfillInFlight) return { skipped: true, reason: 'already running' };
+  backfillInFlight = true;
+  const t0 = Date.now();
+  try {
+    const units = collectAllRetrievalUnits();
+    const liveIds = new Set(units.map(u => u.id));
+    // Fetch current embeddings map
+    const existing = new Map();
+    for (const row of selectAllExistingEmbIdsStmt.all()) {
+      existing.set(row.id, row.content_hash);
+    }
+    // Determine deltas
+    const toEmbed = units.filter(u => existing.get(u.id) !== u.contentHash);
+    const toDelete = [...existing.keys()].filter(id => !liveIds.has(id));
+    let embedded = 0;
+    if (toEmbed.length > 0 && OPENAI_API_KEY) {
+      // Batch into chunks of 100 inputs per OpenAI call
+      for (let i = 0; i < toEmbed.length; i += 100) {
+        const batch = toEmbed.slice(i, i + 100);
+        try {
+          const vectors = await embedTexts(batch.map(b => b.content));
+          const now = new Date().toISOString();
+          for (let j = 0; j < batch.length; j++) {
+            const u = batch[j];
+            const v = vectors[j];
+            if (!v) continue;
+            upsertEmbeddingStmt.run(
+              u.id, u.sourceType, u.sourceId, u.content, u.contentHash,
+              float32ToBlob(v), EMBEDDING_MODEL, now
+            );
+            embedded++;
+          }
+        } catch (e) {
+          console.warn('Embed batch failed (will retry on next backfill):', e.message);
+        }
+      }
+    }
+    let deleted = 0;
+    for (const id of toDelete) {
+      try { deleteEmbeddingStmt.run(id); deleted++; } catch {}
+    }
+    const elapsed = Date.now() - t0;
+    if (embedded || deleted) {
+      console.log(`Embed backfill: embedded=${embedded} deleted=${deleted} skipped=${units.length - embedded} (${elapsed}ms)`);
+    }
+    return { embedded, deleted, totalLive: units.length, elapsedMs: elapsed };
+  } finally {
+    backfillInFlight = false;
+  }
+}
+
+// Debounced trigger — used after PUT /api/concepts and PUT /api/dossier so
+// rapid sync calls don't hammer the embeddings API.
+let backfillDebounceTimer = null;
+function scheduleEmbedBackfill(delayMs = 2000) {
+  if (backfillDebounceTimer) clearTimeout(backfillDebounceTimer);
+  backfillDebounceTimer = setTimeout(() => {
+    backfillDebounceTimer = null;
+    runEmbedBackfill().catch(e => console.warn('Backfill error:', e.message));
+  }, delayMs);
+}
+
+// Run an initial backfill 10s after cold start (gives the server time to
+// stabilize, doesn't block boot).
+setTimeout(() => {
+  runEmbedBackfill().catch(e => console.warn('Initial backfill error:', e.message));
+}, 10000);
+
+// k-nearest-neighbor search over embeddings.
+// Returns top-k rows: [{ id, source_type, source_id, content, score }].
+// Uses sqlite-vec if loaded; falls back to JS cosine over BLOB rows.
+function knnSearch(queryVec, scopeTypes, k = 12) {
+  const types = (scopeTypes && scopeTypes.length) ? scopeTypes : ['concept', 'dossier_entity', 'dossier_note'];
+  if (useVecExt) {
+    try {
+      // sqlite-vec exposes vec_distance_cosine for raw BLOB embeddings
+      const placeholders = types.map(() => '?').join(',');
+      const rows = db.prepare(
+        `SELECT id, source_type, source_id, content,
+                vec_distance_cosine(embedding, ?) AS dist
+           FROM embeddings
+          WHERE source_type IN (${placeholders})
+          ORDER BY dist ASC LIMIT ?`
+      ).all(float32ToBlob(queryVec), ...types, k);
+      return rows.map(r => ({ ...r, score: 1 - r.dist }));
+    } catch (e) {
+      console.warn('vec_distance_cosine failed, falling back to JS:', e.message);
+    }
+  }
+  // JS cosine fallback
+  const all = selectAllEmbeddingsByScopeStmt.all(JSON.stringify(types));
+  const scored = [];
+  for (const row of all) {
+    const v = blobToFloat32(row.embedding);
+    scored.push({
+      id: row.id, source_type: row.source_type, source_id: row.source_id,
+      content: row.content, score: cosineSim(queryVec, v),
+    });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, k);
+}
 
 const server = http.createServer(async (req, res) => {
   // CORS headers (for local dev)
@@ -768,6 +1063,7 @@ const server = http.createServer(async (req, res) => {
         upsertAppStateStmt.run('concepts', JSON.stringify(concepts), new Date().toISOString());
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, count: concepts.length }));
+        scheduleEmbedBackfill(); // refresh vector index in the background
       } catch (err) {
         console.error('Save concepts error:', err.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -811,8 +1107,193 @@ const server = http.createServer(async (req, res) => {
         upsertAppStateStmt.run('dossier_entities', JSON.stringify(entities), new Date().toISOString());
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, count: entities.length }));
+        scheduleEmbedBackfill(); // refresh vector index in the background
       } catch (err) {
         console.error('Save dossier error:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // ─── Embed backfill (admin/dev) ──────────────────────────────────────────
+  // Force a re-scan of all corpora and (re)embed anything new or changed.
+  // Runs automatically after PUTs and on cold start; this endpoint exists for
+  // manual triggers and for status reporting.
+  if (req.method === 'POST' && req.url === '/api/embed-backfill') {
+    try {
+      const result = await runEmbedBackfill();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ...result, useVecExt }));
+    } catch (err) {
+      console.error('Embed backfill error:', err.message);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // ─── Knowledge chat (RAG) ────────────────────────────────────────────────
+  // Ask a question; the server retrieves top-k matching units from the user's
+  // own concepts/library/dossier and answers using ONLY that context.
+  if (req.method === 'POST' && req.url === '/api/knowledge-chat') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body || '{}');
+        const { question, history, scope, k } = _body;
+        if (!question || typeof question !== 'string' || question.trim().length < 2) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing question' }));
+          return;
+        }
+        if (!OPENAI_API_KEY) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Server not configured for embeddings (OPENAI_API_KEY missing)' }));
+          return;
+        }
+
+        // Map UI scope label to source_type list. 'library' is a subset of
+        // 'concept' (concepts with bucket==='library'); we filter post-retrieval
+        // by hydrating and checking bucket.
+        const scopeTypes = scope === 'concepts' ? ['concept']
+          : scope === 'dossier' ? ['dossier_entity', 'dossier_note']
+          : scope === 'library' ? ['concept']
+          : ['concept', 'dossier_entity', 'dossier_note'];
+
+        const topK = Math.min(Math.max(parseInt(k, 10) || 12, 4), 30);
+
+        // 1. Embed the question
+        let qVecs;
+        try {
+          qVecs = await embedTexts([question.trim()]);
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Question embedding failed: ' + e.message }));
+          return;
+        }
+        const qVec = qVecs[0];
+        if (!qVec) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Empty question embedding' }));
+          return;
+        }
+
+        // 2. KNN search
+        let results = knnSearch(qVec, scopeTypes, topK);
+
+        // 3. Apply 'library' scope filter (concepts with bucket==='library')
+        if (scope === 'library') {
+          const cRow = selectAppStateStmt.get('concepts');
+          const concepts = cRow && cRow.value ? JSON.parse(cRow.value) : [];
+          const libraryIds = new Set((concepts || []).filter(c => c.bucket === 'library').map(c => c.id));
+          results = results.filter(r => r.source_type === 'concept' && libraryIds.has(r.source_id));
+        }
+
+        if (results.length === 0) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            answer: "I don't have anything in your knowledge base that matches that question yet. Try saving some concepts or notes first.",
+            citations: [],
+          }));
+          return;
+        }
+
+        // 4. Hydrate titles for citations and build context block
+        const cRow = selectAppStateStmt.get('concepts');
+        const concepts = cRow && cRow.value ? JSON.parse(cRow.value) : [];
+        const conceptById = new Map((concepts || []).map(c => [c.id, c]));
+        const dRow = selectAppStateStmt.get('dossier_entities');
+        const ents = dRow && dRow.value ? JSON.parse(dRow.value) : [];
+        const entityById = new Map((ents || []).map(e => [e.id, e]));
+
+        const citations = [];
+        const ctxBlocks = results.map((r, i) => {
+          let title = '', payload = r.content;
+          if (r.source_type === 'concept') {
+            const c = conceptById.get(r.source_id);
+            title = c ? c.title : 'Concept';
+            citations.push({ type: 'concept', sourceId: r.source_id, title });
+          } else if (r.source_type === 'dossier_entity') {
+            const e = entityById.get(r.source_id);
+            title = e ? e.name : 'Dossier entry';
+            citations.push({ type: 'dossier_entity', sourceId: r.source_id, title });
+          } else if (r.source_type === 'dossier_note') {
+            const [entId, noteId] = (r.source_id || '').split('/');
+            const e = entityById.get(entId);
+            const note = e && e.notes ? e.notes.find(n => n.id === noteId) : null;
+            const dateStr = note && note.createdAt ? new Date(note.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+            title = e ? `${e.name}${dateStr ? ' · ' + dateStr : ''}` : 'Note';
+            citations.push({ type: 'dossier_note', sourceId: r.source_id, title });
+          }
+          return `[${i + 1}] ${title}\n${payload}`;
+        }).join('\n\n---\n\n');
+
+        // 5. Build messages and call Anthropic
+        const sys = `You are answering the user's question using ONLY their personal knowledge base. The retrieved chunks below are from concept cards, library summaries, and dossier (people + firm) notes the user has saved.
+
+Rules:
+- Answer using the knowledge below. Do not introduce facts that aren't there.
+- Cite specific sources inline using [Title] markers (e.g. [Henry Gao · Apr 12]).
+- If the answer is genuinely not in the knowledge base, say so honestly. Don't speculate.
+- Keep answers tight (3-6 sentences typically) unless the question genuinely needs depth.
+- Voice: a knowledgeable friend who has read all the user's notes.
+
+KNOWLEDGE BASE:
+
+${ctxBlocks}`;
+
+        const usedModel = pickAnthropicModel(_body);
+        const messages = Array.isArray(history) ? history.slice(-8) : [];
+        messages.push({ role: 'user', content: question.trim() });
+
+        const anthropicPayload = JSON.stringify({
+          model: usedModel,
+          system: sys,
+          messages,
+          max_tokens: 1500,
+        });
+
+        const httpsLib = require('https');
+        const apiReq = httpsLib.request({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(anthropicPayload),
+          },
+        }, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('knowledge-chat Anthropic error:', apiRes.statusCode, data.slice(0, 300));
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `Chat failed (HTTP ${apiRes.statusCode})` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const answer = (parsed.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n').trim();
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ answer, citations, model: usedModel }));
+            } catch (e) {
+              console.error('knowledge-chat parse error:', e.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(anthropicPayload);
+        apiReq.end();
+      } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
