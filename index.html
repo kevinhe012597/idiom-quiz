@@ -1895,10 +1895,10 @@ textarea { resize: vertical; min-height: 80px; }
           <select id="model-select" class="model-select" onchange="saveModelChoice(this)" style="width:100%; margin-top:6px; padding:10px; border-radius:8px; border:1px solid var(--surface2); background:var(--bg); font-size:0.9rem; color:var(--text);">
             <optgroup label="OpenAI">
               <option value="gpt-4o-mini">GPT-4o Mini (fast & cheap)</option>
-              <option value="gpt-5.5-nano">GPT-5.5 Nano (fastest)</option>
-              <option value="gpt-5.5-mini">GPT-5.5 Mini (balanced)</option>
-              <option value="gpt-5.5">GPT-5.5 (powerful)</option>
-              <option value="gpt-5.5-pro">GPT-5.5 Pro (most powerful)</option>
+              <option value="gpt-5.4-nano">GPT-5.4 Nano (fastest)</option>
+              <option value="gpt-5.4-mini">GPT-5.4 Mini (balanced)</option>
+              <option value="gpt-5.4">GPT-5.4 (powerful)</option>
+              <option value="gpt-5.4-pro">GPT-5.4 Pro (most powerful)</option>
             </optgroup>
             <optgroup label="Anthropic">
               <option value="claude-opus-4-7">Claude Opus 4.7 (most powerful)</option>
@@ -2527,10 +2527,10 @@ textarea { resize: vertical; min-height: 80px; }
     <select id="concept-model-select" class="model-select" onchange="saveModelChoice(this)" style="width:100%; margin-top:6px; padding:10px; border-radius:8px; border:1px solid var(--surface2); background:var(--bg); font-size:0.9rem; color:var(--text);">
       <optgroup label="OpenAI">
         <option value="gpt-4o-mini">GPT-4o Mini (fast & cheap)</option>
-        <option value="gpt-5.5-nano">GPT-5.5 Nano (fastest)</option>
-        <option value="gpt-5.5-mini">GPT-5.5 Mini (balanced)</option>
-        <option value="gpt-5.5">GPT-5.5 (powerful)</option>
-        <option value="gpt-5.5-pro">GPT-5.5 Pro (most powerful)</option>
+        <option value="gpt-5.4-nano">GPT-5.4 Nano (fastest)</option>
+        <option value="gpt-5.4-mini">GPT-5.4 Mini (balanced)</option>
+        <option value="gpt-5.4">GPT-5.4 (powerful)</option>
+        <option value="gpt-5.4-pro">GPT-5.4 Pro (most powerful)</option>
       </optgroup>
       <optgroup label="Anthropic">
         <option value="claude-opus-4-7">Claude Opus 4.7 (most powerful)</option>
@@ -3063,8 +3063,22 @@ const SAMPLE_DATA = [
 ];
 
 // ─── Model Selection ─────────────────────────────────────────────────────
+// Hard-coded list of model IDs that any saved selection must belong to.
+// Anything else (e.g. an old 5.5 guess that no longer exists) silently
+// falls through to the default.
+const KNOWN_MODELS = new Set([
+  'gpt-4o-mini',
+  'gpt-5.4-nano', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-pro',
+  'claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001',
+  'accounts/fireworks/models/deepseek-v3p2',
+  'accounts/fireworks/models/llama-v3p3-70b-instruct',
+  'accounts/fireworks/models/qwen3p6-plus',
+  'accounts/fireworks/models/kimi-k2p6',
+]);
 function getSelectedModel() {
-  return localStorage.getItem('lexicon-model') || 'gpt-5.5-mini';
+  const stored = localStorage.getItem('lexicon-model');
+  if (stored && KNOWN_MODELS.has(stored)) return stored;
+  return 'gpt-5.4-mini';
 }
 function saveModelChoice(sourceEl) {
   const model = sourceEl ? sourceEl.value : (document.getElementById('model-select') || {}).value;

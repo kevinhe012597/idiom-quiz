@@ -190,7 +190,11 @@ const OPENAI_MODELS = new Set([
 ]);
 
 const ALLOWED_MODELS = new Set([...OPENAI_MODELS, ...FIREWORKS_MODELS, ...ANTHROPIC_MODELS]);
-const DEFAULT_MODEL = 'gpt-5.5-mini';
+// Note: my gpt-5.5-* slug guesses (nano/mini/pro) returned 404 from OpenAI.
+// Until we confirm the actual GPT-5.5 model IDs, default stays on gpt-5.4-mini
+// which is verified working. The 5.5 entries above remain allowlisted so when
+// the right IDs are found, only this constant + the dropdown labels need updating.
+const DEFAULT_MODEL = 'gpt-5.4-mini';
 
 function pickModel(body) {
   return (body && body.model && ALLOWED_MODELS.has(body.model)) ? body.model : DEFAULT_MODEL;
