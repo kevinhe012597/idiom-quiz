@@ -2863,7 +2863,7 @@ textarea { resize: vertical; min-height: 80px; }
   <div class="header">
     <button class="back" onclick="showLibrary()">&larr;</button>
     <h2 style="color:var(--concept); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;" id="library-entry-title">Source</h2>
-    <div></div>
+    <button onclick="deleteLibraryEntry()" title="Delete this summary" style="background:none; border:none; color:var(--red); font-size:0.9rem; font-weight:600; cursor:pointer; padding:6px 10px;">🗑 Delete</button>
   </div>
   <div id="library-entry-meta" style="font-size:0.78rem; color:var(--text-dim); margin-bottom:14px;"></div>
   <div id="library-entry-list"></div>
@@ -7839,6 +7839,34 @@ function openLibraryEntry(source) {
     }).join('');
   }
   showScreen('library-entry');
+}
+
+// Delete a Library entry — removes every card associated with the source.
+// If any of those cards are also drillable (bucket=undefined), the user is
+// warned that their drill schedule will be lost.
+function deleteLibraryEntry() {
+  const source = libraryEntrySource;
+  if (!source) return;
+  const matching = concepts.filter(c => c.inLibrary && (c.source || '').trim() === source);
+  if (matching.length === 0) {
+    showLibrary();
+    return;
+  }
+  const drillableCount = matching.filter(c => c.bucket !== 'library' && c.bucket !== 'skip').length;
+  let confirmMsg = `Delete this summary?\n\n"${source}"\n\n${matching.length} card${matching.length === 1 ? '' : 's'} will be permanently removed.`;
+  if (drillableCount > 0) {
+    confirmMsg += `\n\n⚠️ ${drillableCount} of these are also in your drill rotation — their drill progress will be lost.`;
+  }
+  if (!confirm(confirmMsg)) return;
+
+  const idsToRemove = new Set(matching.map(c => c.id));
+  const remaining = concepts.filter(c => !idsToRemove.has(c.id));
+  concepts.length = 0;
+  concepts.push(...remaining);
+  saveConcepts(concepts);
+  showToast(`Deleted "${source}" (${matching.length} card${matching.length === 1 ? '' : 's'})`);
+  libraryEntrySource = null;
+  showLibrary();
 }
 
 // ─── Concept Lookup ─────────────────────────────────────────────────────
