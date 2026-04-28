@@ -1907,7 +1907,8 @@ textarea { resize: vertical; min-height: 80px; }
 
   <!-- Dashboard Screen -->
   <div id="dashboard" class="screen">
-    <div class="header">
+    <div class="header" style="position:relative;">
+      <button class="back" onclick="showScreen('module-select')" style="position:absolute; left:0; top:50%; transform:translateY(-50%);">&larr;</button>
       <img src="/logo.svg" alt="Lexicon" style="height: 44px; width: auto;">
     </div>
     <div class="stats-grid bucket-grid">
@@ -2560,7 +2561,7 @@ textarea { resize: vertical; min-height: 80px; }
 <!-- Concepts Dashboard -->
 <div id="concepts-dashboard" class="screen">
   <div class="header">
-    <button class="back" onclick="enterVocab()">&larr;</button>
+    <button class="back" onclick="showScreen('module-select')">&larr;</button>
     <h2 style="color:var(--concept);">💡 Concepts</h2>
     <div></div>
   </div>
@@ -2635,10 +2636,16 @@ textarea { resize: vertical; min-height: 80px; }
     <h2 style="color:var(--concept);">Look Up a Concept</h2>
     <div></div>
   </div>
-  <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:12px;">Describe a concept, company, technology, or topic you want to remember.</p>
-  <div class="lookup-input-row">
-    <input type="text" id="concept-lookup-input" placeholder="e.g. kernel-level optimization for inference" autocomplete="off">
-    <button class="btn-primary concept-btn" id="concept-lookup-btn" onclick="doConceptLookup()">Look Up</button>
+  <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:12px;">Describe a concept, company, technology, or topic you want to remember. Tap <strong>+</strong> to add more rows and look up several at once.</p>
+  <div id="cl-input-stack" style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;">
+    <div class="cl-input-row" style="display:flex; gap:6px; align-items:center;">
+      <input type="text" class="cl-input-field" placeholder="e.g. kernel-level optimization for inference" autocomplete="off" onkeydown="if(event.key==='Enter') doConceptLookup()" style="flex:1;">
+    </div>
+  </div>
+  <div style="display:flex; gap:6px; margin-bottom:12px;">
+    <button onclick="addConceptLookupInput()" class="btn-secondary" style="width:auto; padding:8px 14px; font-size:0.85rem;" title="Add another concept">+ Add another</button>
+    <div style="flex:1;"></div>
+    <button class="btn-primary concept-btn" id="concept-lookup-btn" onclick="doConceptLookup()" style="width:auto; padding:8px 18px;">Look Up</button>
   </div>
   <div id="concept-lookup-result" class="lookup-result-wide" style="display:none; margin-top:16px;">
     <div class="lookup-result-grid">
@@ -2754,7 +2761,10 @@ textarea { resize: vertical; min-height: 80px; }
       </div>
     </div>
     <div class="form-group" style="margin-bottom:12px;">
-      <label style="font-size:0.8rem; color:var(--text-dim);">Your Notes</label>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+        <label style="font-size:0.8rem; color:var(--text-dim);">Your Notes</label>
+        <button type="button" onclick="polishTextarea('concept-edit-notes', () => document.getElementById('concept-edit-title')?.value || '')" class="btn-secondary" style="width:auto; padding:3px 10px; font-size:0.72rem;" title="Clean up the text — preserves meaning and your voice, just polishes grammar and clarity">✨ Polish</button>
+      </div>
       <textarea id="concept-edit-notes" rows="3" placeholder="Your own context, connections, why this matters to you..."></textarea>
     </div>
     <div style="display:flex; gap:8px;">
@@ -3024,6 +3034,7 @@ textarea { resize: vertical; min-height: 80px; }
     <textarea id="dossier-note-input" rows="3" placeholder="Something you learned, a quote, a fact..." style="width:100%; padding:10px 12px; font-size:0.9rem; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
     <div style="display:flex; gap:6px; margin-top:6px;">
       <input type="text" id="dossier-note-source" placeholder="Source (optional, e.g. 'lunch on 4/12')" style="flex:1; padding:8px 12px; font-size:0.85rem; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text);">
+      <button type="button" onclick="polishTextarea('dossier-note-input', () => document.getElementById('dossier-entity-name')?.textContent || '')" class="btn-secondary" style="width:auto; padding:8px 12px; font-size:0.78rem;" title="Polish your rough notes — preserves meaning + voice">✨ Polish</button>
       <button onclick="dossierAddNote()" class="btn-primary" id="dossier-note-save-btn" style="width:auto; padding:8px 18px; font-size:0.85rem;">Save</button>
     </div>
   </div>
@@ -8777,10 +8788,36 @@ function setLookupModelBadge(model, fallbackNote) {
   }
 }
 
+// ─── Multi-input concept lookup ──────────────────────────────────────────
+// Each "+ Add another" click appends an input row. On Look Up:
+//   - 1 query  → existing rich single-result UI (with Tailor, tag editor, etc.)
+//   - 2+ queries → fan out in parallel, render the batched preview UI
+//                  (concept-quick-step2) so the user can edit + save many at once.
+function addConceptLookupInput() {
+  const stack = document.getElementById('cl-input-stack');
+  if (!stack) return;
+  const row = document.createElement('div');
+  row.className = 'cl-input-row';
+  row.style.cssText = 'display:flex; gap:6px; align-items:center;';
+  row.innerHTML = `
+    <input type="text" class="cl-input-field" placeholder="another concept..." autocomplete="off" onkeydown="if(event.key==='Enter') doConceptLookup()" style="flex:1;">
+    <button onclick="this.parentElement.remove()" class="qa-remove-btn" title="Remove this row" aria-label="Remove">×</button>
+  `;
+  stack.appendChild(row);
+  row.querySelector('input').focus();
+}
+
 async function doConceptLookup() {
-  const input = document.getElementById('concept-lookup-input');
-  const query = input.value.trim();
-  if (!query) { showToast('Describe a concept first'); return; }
+  const inputs = document.querySelectorAll('.cl-input-field');
+  const queries = [...inputs].map(i => i.value.trim()).filter(Boolean);
+  if (queries.length === 0) { showToast('Describe a concept first'); return; }
+
+  // Fall through to multi-flow when 2+ inputs are filled
+  if (queries.length >= 2) {
+    return doMultiConceptLookup(queries);
+  }
+
+  const query = queries[0];
 
   const btn = document.getElementById('concept-lookup-btn');
   btn.disabled = true;
@@ -8853,9 +8890,82 @@ async function doConceptLookup() {
   }
 }
 
-document.getElementById('concept-lookup-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') doConceptLookup();
-});
+// Note: Enter-to-submit is wired inline on each .cl-input-field via onkeydown
+// (allows new dynamically-added rows to inherit the behavior automatically).
+
+// Multi-query lookup: fans out one /api/concept-lookup request per query
+// (capped concurrency 4 so we don't blast Anthropic's rate limits), collects
+// the resulting cards, then routes the user to the batched preview screen
+// where they can edit + assign destination + save.
+async function doMultiConceptLookup(queries) {
+  const btn = document.getElementById('concept-lookup-btn');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  let done = 0;
+  const total = queries.length;
+  btn.textContent = `Looking up 0/${total}...`;
+
+  // Run with concurrency limit so the user's tier-1 Anthropic limit doesn't trip
+  const results = [];
+  const concurrency = Math.min(4, total);
+  let next = 0;
+  const workers = [];
+  for (let w = 0; w < concurrency; w++) {
+    workers.push((async () => {
+      while (next < queries.length) {
+        const idx = next++;
+        const q = queries[idx];
+        try {
+          const resp = await apiFetch('/api/concept-lookup', { query: q });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const card = await resp.json();
+          results[idx] = { ok: true, card, query: q };
+        } catch (err) {
+          console.warn(`Lookup failed for "${q}":`, err.message);
+          results[idx] = { ok: false, query: q, error: err.message };
+        }
+        done++;
+        btn.textContent = `Looking up ${done}/${total}...`;
+      }
+    })());
+  }
+  await Promise.all(workers);
+
+  btn.disabled = false;
+  btn.textContent = orig;
+
+  // Collect successful cards in input order
+  const successCards = results.filter(r => r && r.ok).map(r => r.card);
+  const failedQueries = results.filter(r => r && !r.ok).map(r => r.query);
+
+  if (successCards.length === 0) {
+    showToast('All lookups failed: ' + failedQueries.join(', '));
+    return;
+  }
+
+  // Route to the batched preview UI — same path as article extraction.
+  // Note source label: "Multi-lookup" by default; user can edit on the preview.
+  const sourceLabel = `Multi-lookup (${successCards.length} concept${successCards.length === 1 ? '' : 's'})`;
+  lastExtractContext = { text: queries.join('\n') };
+  // Default to library mode (the standard concept extraction default)
+  conceptQuickMode = 'library';
+  showScreen('concept-add-edit');
+  showConceptAddForm();
+  switchConceptTab('article');
+  renderConceptExtractionResults(
+    successCards,
+    sourceLabel,
+    sourceLabel,
+    'concept-panel-article',
+    null
+  );
+
+  if (failedQueries.length > 0) {
+    showToast(`Loaded ${successCards.length}; ${failedQueries.length} failed: ${failedQueries.slice(0, 2).join(', ')}${failedQueries.length > 2 ? '…' : ''}`);
+  } else {
+    showToast(`Loaded ${successCards.length} concepts — review and save`);
+  }
+}
 
 async function tailorConceptLookup(appendMode) {
   const tailorInput = document.getElementById('cl-tailor-input');
@@ -8992,7 +9102,11 @@ function conceptLookupAdd() {
   addBtn.disabled = true;
   addBtn.style.opacity = '0.5';
   document.getElementById('concept-lookup-dupe').style.display = 'inline';
-  document.getElementById('concept-lookup-input').value = '';
+  // Reset the input stack to a single empty row
+  const stack = document.getElementById('cl-input-stack');
+  if (stack) {
+    stack.innerHTML = '<div class="cl-input-row" style="display:flex; gap:6px; align-items:center;"><input type="text" class="cl-input-field" placeholder="e.g. kernel-level optimization for inference" autocomplete="off" onkeydown="if(event.key===\'Enter\') doConceptLookup()" style="flex:1;"></div>';
+  }
 }
 
 function bumpConceptCard() {
@@ -10386,6 +10500,56 @@ async function extractConceptsFromYoutube() {
 // Polish a single fully-formed thought into one concise card. Goes through
 // the same preview/save flow as article extraction, so the user can edit,
 // pick the destination (📚 Library / 🎯 Drill), and save like any other card.
+// Generic prose-cleanup helper. Wired to ✨ Polish buttons next to note
+// textareas (concept edit "Your Notes", dossier add-note, etc.).
+// - textareaId: the DOM id of the textarea to polish in-place
+// - contextFn: optional () => string returning a label for context (e.g. concept title)
+//
+// Stores the original text in a data-attribute so the user can undo. After
+// polish, the button flips to "↶ Undo" for ~6 seconds before reverting label.
+async function polishTextarea(textareaId, contextFn) {
+  const ta = document.getElementById(textareaId);
+  if (!ta) return;
+  // Find the polish button — it's the sibling that just got clicked. Walk up.
+  const btn = (event && event.target && event.target.closest && event.target.closest('button')) || null;
+
+  // Undo path: if we previously polished, restore the original
+  if (btn && btn.dataset.polishOriginal !== undefined) {
+    ta.value = btn.dataset.polishOriginal;
+    delete btn.dataset.polishOriginal;
+    btn.textContent = '✨ Polish';
+    return;
+  }
+
+  const text = (ta.value || '').trim();
+  if (!text || text.length < 3) { showToast('Type some notes first'); return; }
+
+  let context = '';
+  try { if (typeof contextFn === 'function') context = contextFn() || ''; } catch {}
+
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    const resp = await apiFetch('/api/polish-notes', { text, context });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    const polished = (data.text || '').trim();
+    if (!polished) throw new Error('Empty response');
+    if (btn) btn.dataset.polishOriginal = text;
+    ta.value = polished;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '↶ Undo polish';
+    }
+    showToast('Polished — review or undo');
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '✨ Polish'; }
+    showToast('Error: ' + err.message);
+  }
+}
+
 async function polishThought() {
   const ta = document.getElementById('concept-thought-input');
   const sourceEl = document.getElementById('concept-thought-source');

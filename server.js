@@ -1616,6 +1616,88 @@ ${notesText}`;
     return;
   }
 
+  // ─── Polish rough notes ───────────────────────────────────────────────────
+  // Generic prose cleanup. Used by note-input fields anywhere in the app
+  // (concept edit "Your Notes", dossier add-note, etc.). Preserves the user's
+  // meaning + voice; just cleans grammar, structure, and clarity.
+  if (req.method === 'POST' && req.url === '/api/polish-notes') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { text, context } = _body;
+        if (!text || typeof text !== 'string' || text.trim().length < 3) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing or too-short text' }));
+          return;
+        }
+
+        const usedModel = pickAnthropicModel(_body);
+        const ctxClause = context && context.trim()
+          ? `\n\nThe note is about: "${context.trim()}". Use this only for grammatical context (e.g. proper nouns).`
+          : '';
+
+        const systemPrompt = `You polish a user's rough notes into clean, readable prose.
+
+CRITICAL RULES:
+- Preserve the user's MEANING exactly. Do not add, omit, or change facts.
+- Preserve the user's VOICE — first person, casual phrasing, their word choices when appropriate.
+- Fix grammar, punctuation, awkward phrasing, run-on sentences.
+- Tighten where possible — drop filler words, redundancies. Don't pad.
+- Keep it conversational, not stiff or formal. The user is taking personal notes, not writing an essay.
+- Output ONLY the polished version. No preamble, no explanation, no quotes around it.${ctxClause}`;
+
+        const anthropicPayload = JSON.stringify({
+          model: usedModel,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: `Polish this:\n\n${text.trim()}` }],
+          max_tokens: 1500,
+        });
+        const https = require('https');
+        const apiReq = https.request({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(anthropicPayload),
+          },
+        }, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('polish-notes Anthropic error:', apiRes.statusCode, data.slice(0, 300));
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `Polish failed (HTTP ${apiRes.statusCode})` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const polished = (parsed.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n').trim();
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ text: polished, model: usedModel }));
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(anthropicPayload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/polish-thought') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
