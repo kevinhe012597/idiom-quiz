@@ -1899,6 +1899,7 @@ textarea { resize: vertical; min-height: 80px; }
               <option value="gpt-5.4-mini">GPT-5.4 Mini (balanced)</option>
               <option value="gpt-5.4">GPT-5.4 (powerful)</option>
               <option value="gpt-5.4-pro">GPT-5.4 Pro (most powerful)</option>
+              <option value="gpt-5.5">GPT-5.5 (reasoning, frontier — pricey)</option>
             </optgroup>
             <optgroup label="Anthropic">
               <option value="claude-opus-4-7">Claude Opus 4.7 (most powerful)</option>
@@ -2531,6 +2532,7 @@ textarea { resize: vertical; min-height: 80px; }
         <option value="gpt-5.4-mini">GPT-5.4 Mini (balanced)</option>
         <option value="gpt-5.4">GPT-5.4 (powerful)</option>
         <option value="gpt-5.4-pro">GPT-5.4 Pro (most powerful)</option>
+        <option value="gpt-5.5">GPT-5.5 (reasoning, frontier — pricey)</option>
       </optgroup>
       <optgroup label="Anthropic">
         <option value="claude-opus-4-7">Claude Opus 4.7 (most powerful)</option>
@@ -3069,6 +3071,7 @@ const SAMPLE_DATA = [
 const KNOWN_MODELS = new Set([
   'gpt-4o-mini',
   'gpt-5.4-nano', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-pro',
+  'gpt-5.5',
   'claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001',
   'accounts/fireworks/models/deepseek-v3p2',
   'accounts/fireworks/models/llama-v3p3-70b-instruct',
@@ -8395,9 +8398,7 @@ function shortModelName(modelId) {
   if (modelId.startsWith('claude-opus-4-7'))    return 'Opus 4.7';
   if (modelId.startsWith('claude-sonnet-4-6'))  return 'Sonnet 4.6';
   if (modelId.startsWith('claude-haiku-4-5'))   return 'Haiku 4.5';
-  if (modelId.startsWith('gpt-5.5-pro'))        return 'GPT-5.5 Pro';
-  if (modelId.startsWith('gpt-5.5-mini'))       return 'GPT-5.5 Mini';
-  if (modelId.startsWith('gpt-5.5-nano'))       return 'GPT-5.5 Nano';
+  if (modelId.startsWith('gpt-5.5'))            return 'GPT-5.5';
   if (modelId.startsWith('gpt-5.5'))            return 'GPT-5.5';
   if (modelId.startsWith('gpt-5.4-pro'))        return 'GPT-5.4 Pro';
   if (modelId.startsWith('gpt-5.4-mini'))       return 'GPT-5.4 Mini';

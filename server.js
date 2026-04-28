@@ -183,10 +183,10 @@ const ANTHROPIC_MODELS = new Set([
 
 const OPENAI_MODELS = new Set([
   'gpt-4o-mini',
-  // 5.4 family kept for backward-compat with cards already saved with these IDs
+  // 5.4 family
   'gpt-5.4-nano', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-pro',
-  // 5.5 family (current)
-  'gpt-5.5-nano', 'gpt-5.5-mini', 'gpt-5.5', 'gpt-5.5-pro',
+  // 5.5 — single frontier reasoning model. No mini/nano/pro variants in this generation.
+  'gpt-5.5',
 ]);
 
 const ALLOWED_MODELS = new Set([...OPENAI_MODELS, ...FIREWORKS_MODELS, ...ANTHROPIC_MODELS]);
@@ -514,12 +514,31 @@ function translateFromAnthropic(rawDataStr) {
   }
 }
 
+// OpenAI reasoning models (o1, o3, o4, gpt-5.5, ...) reject the `temperature`
+// parameter — they internally use sampling tied to `reasoning.effort`. We
+// can't pass temperature from older endpoints designed for chat models.
+function isReasoningModel(model) {
+  if (!model) return false;
+  return /^gpt-5\.5/.test(model) || /^o[1-9]\b/.test(model);
+}
+
 // Build https.request options + body from a payload string (auto-detects provider from model)
 function buildRequestOptions(payload) {
   let model = DEFAULT_MODEL;
   try { model = JSON.parse(payload).model || DEFAULT_MODEL; } catch {}
   const prov = getProvider(model);
   let body = payload;
+  // For OpenAI reasoning models, strip `temperature` from the body before
+  // sending. The endpoint will reject the request with HTTP 400 otherwise.
+  if (prov.provider === 'openai' && isReasoningModel(model)) {
+    try {
+      const obj = JSON.parse(payload);
+      if ('temperature' in obj) {
+        delete obj.temperature;
+        body = JSON.stringify(obj);
+      }
+    } catch {}
+  }
   let headers;
   if (prov.provider === 'anthropic') {
     body = translateToAnthropic(payload);
