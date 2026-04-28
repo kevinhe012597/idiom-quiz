@@ -3091,7 +3091,7 @@ Return JSON:
     req.on('end', async () => {
       try {
         const _body = JSON.parse(body);
-        const { sentence, word, intendedMeaning } = _body;
+        const { sentence, word, intendedMeaning, constraint } = _body;
         if (!sentence || !word) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing sentence or word' }));
@@ -3100,6 +3100,13 @@ Return JSON:
 
         const meaningContext = intendedMeaning
           ? `\nThe user has also explained what they are trying to convey: "${intendedMeaning}". Use this to better judge whether the word fits their intent and suggest alternatives that match what they actually mean.`
+          : '';
+
+        // Optional constraint on the suggested word/phrase shape (start letter,
+        // length, register, root, pattern, etc.). Tightens both the corrected
+        // suggestion and the alternatives.
+        const constraintContext = constraint
+          ? `\nCRITICAL CONSTRAINT — the user's target word/phrase MUST satisfy: "${constraint}". This applies to suggestedWord AND every entry in alternatives. If you cannot find a word that fits both the meaning AND the constraint, lower the verdict to "awkward" and say so honestly in the explanation. Do NOT silently ignore this constraint.`
           : '';
 
         const payload = JSON.stringify({
@@ -3117,7 +3124,7 @@ Return JSON:
   "originalWordMeaning": "The meaning of the word the user asked about",
   "originalWordExample": "An example sentence where the user's original word WOULD be used correctly and naturally"
 }
-Be concise but helpful. If the word is correct, acknowledge it and still offer alternatives for variety. Always provide originalWordMeaning and originalWordExample showing proper usage of the queried word.${meaningContext}`
+Be concise but helpful. If the word is correct, acknowledge it and still offer alternatives for variety. Always provide originalWordMeaning and originalWordExample showing proper usage of the queried word.${meaningContext}${constraintContext}`
             },
             {
               role: 'user',

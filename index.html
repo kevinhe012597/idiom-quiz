@@ -2376,6 +2376,8 @@ textarea { resize: vertical; min-height: 80px; }
       </div>
       <label style="font-size:0.8rem; color:var(--text-dim); margin:8px 0 4px; display:block;">What are you trying to say?</label>
       <input type="text" id="critique-meaning" placeholder="e.g. I mean that the situation is ironic" autocomplete="off">
+      <label style="font-size:0.8rem; color:var(--text-dim); margin:8px 0 4px; display:block;">Constraint <span style="color:var(--text-dim); font-weight:400;">(optional — start, length, pattern, register, etc.)</span></label>
+      <input type="text" id="critique-constraint" placeholder='e.g. "starts with E", "two words", "Latin root", "more formal"' autocomplete="off">
       <button class="btn-primary" id="critique-btn" onclick="doCritique()" style="width:100%; margin-top:10px;">Check</button>
       <div id="critique-result" style="display:none;"></div>
     </div>
@@ -5196,7 +5198,7 @@ let lookupData = null;
 
 function showLookup() {
   // Clear all inputs and results
-  ['lookup-input','translate-input','reverse-input','vibe-input','critique-sentence','critique-word','synonym-input','polish-input','complete-input','complete-meaning','en2zh-input'].forEach(id => {
+  ['lookup-input','translate-input','reverse-input','vibe-input','critique-sentence','critique-word','critique-meaning','critique-constraint','synonym-input','polish-input','complete-input','complete-meaning','en2zh-input'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -5926,6 +5928,7 @@ async function doCritique() {
   const sentence = document.getElementById('critique-sentence').value.trim();
   const word = document.getElementById('critique-word').value.trim();
   const intendedMeaning = (document.getElementById('critique-meaning')?.value || '').trim();
+  const constraint = (document.getElementById('critique-constraint')?.value || '').trim();
   if (!sentence) { showToast('Type your sentence first'); return; }
   if (!word) { showToast('Which word are you unsure about?'); return; }
   trackLookupUsage('critique');
@@ -5935,7 +5938,7 @@ async function doCritique() {
   btn.textContent = '...';
 
   try {
-    const response = await apiFetch('/api/critique', { sentence, word, intendedMeaning });
+    const response = await apiFetch('/api/critique', { sentence, word, intendedMeaning, constraint });
     if (!response.ok) throw new Error('Check failed');
     const result = await response.json();
 
