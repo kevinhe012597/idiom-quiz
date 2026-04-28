@@ -169,7 +169,7 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'idiom-quiz.db');
 // Llama 4 Scout/Maverick and Qwen 3 30B were moved to on-demand-only (dedicated
 // GPU) and 404 from the standard /v1/chat/completions endpoint, so they're out.
 const FIREWORKS_MODELS = new Set([
-  'accounts/fireworks/models/deepseek-v3-0324',
+  'accounts/fireworks/models/deepseek-v3p2',
   'accounts/fireworks/models/llama-v3p3-70b-instruct',
   'accounts/fireworks/models/qwen3-235b-a22b-instruct-2507',
   'accounts/fireworks/models/kimi-k2p6',
