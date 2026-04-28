@@ -2705,7 +2705,7 @@ textarea { resize: vertical; min-height: 80px; }
     <div style="display:flex; gap:0; margin-bottom:16px; border-bottom:2px solid var(--surface2); flex-wrap:wrap;">
       <button id="concept-tab-article" onclick="switchConceptTab('article')" style="flex:1; padding:10px; border:none; background:none; font-size:0.85rem; font-weight:600; cursor:pointer; color:var(--concept); border-bottom:2px solid var(--concept); margin-bottom:-2px;">Import from Article</button>
       <button id="concept-tab-youtube" onclick="switchConceptTab('youtube')" style="flex:1; padding:10px; border:none; background:none; font-size:0.85rem; font-weight:600; cursor:pointer; color:var(--text-dim); border-bottom:2px solid transparent; margin-bottom:-2px;">YouTube</button>
-      <button id="concept-tab-thought" onclick="switchConceptTab('thought')" style="flex:1; padding:10px; border:none; background:none; font-size:0.85rem; font-weight:600; cursor:pointer; color:var(--text-dim); border-bottom:2px solid transparent; margin-bottom:-2px;">My Thought</button>
+      <button id="concept-tab-thought" onclick="switchConceptTab('thought')" style="flex:1; padding:10px; border:none; background:none; font-size:0.85rem; font-weight:600; cursor:pointer; color:var(--text-dim); border-bottom:2px solid transparent; margin-bottom:-2px;">Scattered Thoughts</button>
     </div>
 
     <!-- Article import panel -->
@@ -2774,10 +2774,11 @@ textarea { resize: vertical; min-height: 80px; }
       <p style="color:var(--text-dim); font-size:0.7rem; margin-top:8px; text-align:center;">Public videos only. Up to ~3 hours per video.</p>
     </div>
 
-    <!-- My Thought panel — polish a fully-formed insight into one concise card -->
+    <!-- Scattered Thoughts panel — polish a fully-formed insight into one concise card.
+         Cards from this flow go straight to the drill rotation (no Library entry). -->
     <div id="concept-panel-thought" style="display:none;">
       <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:12px;">
-        Have a thought you want to remember? Drop it in. The AI keeps your point as-is and just sharpens it — no padding, no hallucinated bullets.
+        Have a half-formed thought you want to lock in? Drop it in. The AI keeps your point as-is and just sharpens it — no padding, no hallucinated bullets. Saved straight to the drill rotation.
       </p>
       <textarea id="concept-thought-input" rows="6" placeholder='e.g. LLMs are like operating systems — Microsoft built native apps like Office, but there is still a lot of space for other startups to build on top.' style="width:100%; padding:10px 14px; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-size:0.9rem; font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
       <input type="text" id="concept-thought-source" placeholder="Source (optional, e.g. shower thought, dinner with X)" style="width:100%; margin-top:8px; padding:10px 14px; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-size:0.85rem; box-sizing:border-box;">
@@ -7520,6 +7521,9 @@ let concepts = loadConcepts();
 let conceptLookupData = null;
 let conceptEditId = null; // null = new, string = editing existing
 let conceptQuickResults = [];
+// 'library' (default) — every card goes to 📚 Library, with optional 🎯 Also drill toggle.
+// 'drill' — Scattered Thoughts mode: cards go straight to drill rotation; no Library banner/toggle.
+let conceptQuickMode = 'library';
 let conceptReviewQueue = [];
 let conceptReviewIndex = 0;
 let conceptActiveBucket = null;
@@ -8590,6 +8594,9 @@ function conceptQuickConfirm() {
   const now = new Date().toISOString();
   const batchSource = document.getElementById('cq-batch-source').value.trim() || 'Import';
   const existingTitles = new Set(concepts.map(c => c.title.toLowerCase()));
+  // 'drill' mode (Scattered Thoughts): every card → drill rotation only.
+  // 'library' mode: every card → Library, with optional drill via per-card toggle.
+  const drillOnly = conceptQuickMode === 'drill';
   let totalSaved = 0;
   let alsoDrillCount = 0;
   let firstLibraryCard = null;
@@ -8607,11 +8614,10 @@ function conceptQuickConfirm() {
     const titleInput = document.getElementById(`cq-title-${i}`);
     const editedTitle = titleInput ? titleInput.value.trim() : (r.title || '');
     const editedValue = getValueSelector(`cq-value-${i}`) || undefined;
-    // Every extracted card lives in 📚 Library. The "Also drill" toggle decides
-    // whether it ALSO joins the daily drill rotation. bucket controls drill:
-    //   alsoDrill === true  → bucket: undefined (drillable + in Library)
-    //   alsoDrill === false → bucket: 'library' (Library only, drill skips)
+    // Destination logic — drillOnly is hoisted above the loop.
     const alsoDrill = r.alsoDrill === true;
+    const goesToLibrary = !drillOnly; // drill mode skips Library entirely
+    const goesToDrill = drillOnly || alsoDrill;
     const newCard = {
       id: generateId(),
       title: editedTitle,
@@ -8626,21 +8632,23 @@ function conceptQuickConfirm() {
       repetitions: 0,
       nextReview: today,
       lastReview: null,
-      bucket: alsoDrill ? undefined : 'library',
-      inLibrary: true,
+      bucket: goesToDrill ? undefined : 'library',
+      inLibrary: goesToLibrary,
       createdAt: now
     };
     concepts.unshift(newCard);
     totalSaved++;
-    if (alsoDrill) alsoDrillCount++;
-    if (!firstLibraryCard) firstLibraryCard = newCard;
+    if (goesToDrill) alsoDrillCount++;
+    if (goesToLibrary && !firstLibraryCard) firstLibraryCard = newCard;
   });
 
   saveConcepts(concepts);
 
-  const toastMsg = totalSaved
-    ? `Saved ${totalSaved} to 📚 Library${alsoDrillCount ? ` (${alsoDrillCount} also in 🎯 Drill)` : ''}`
-    : 'Nothing saved';
+  const toastMsg = !totalSaved
+    ? 'Nothing saved'
+    : drillOnly
+      ? `Saved ${totalSaved} to 🎯 Drill rotation`
+      : `Saved ${totalSaved} to 📚 Library${alsoDrillCount ? ` (${alsoDrillCount} also in 🎯 Drill)` : ''}`;
   showToast(toastMsg);
 
   conceptQuickReset();
@@ -8685,6 +8693,7 @@ function conceptQuickReset() {
   document.getElementById('concept-article-progress').style.display = 'none';
   const recountRow = document.getElementById('cq-recount-row');
   if (recountRow) recountRow.style.display = 'none';
+  conceptQuickMode = 'library'; // reset to default for the next extraction
   // Restore the previously-active panel (default to article)
   const activeTab = (document.getElementById('concept-panel-youtube')?.style.display !== 'none' && document.getElementById('concept-panel-article').style.display === 'none') ? 'youtube' : 'article';
   switchConceptTab(activeTab);
@@ -8943,16 +8952,20 @@ function renderConceptExtractionResults(results, suggestedSource, sourceFallback
     }
   }
 
-  // Every extracted card lands in 📚 Library. The "Also drill" toggle is
-  // an opt-in to ALSO add the card to the daily drill rotation.
+  // Library mode: cards default to 📚 Library with optional 🎯 Also drill toggle.
+  // Drill mode (Scattered Thoughts): no Library entry, no toggle — straight to drill.
   results.forEach(r => { if (typeof r.alsoDrill !== 'boolean') r.alsoDrill = false; });
+  const isDrillMode = conceptQuickMode === 'drill';
 
-  const destBanner = `
-    <div style="margin-bottom:10px; padding:10px 12px; background:rgba(139,92,246,0.06); border:1px dashed var(--surface2); border-radius:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-      <span style="font-size:0.78rem; color:var(--text-dim); flex:1; min-width:200px;">All cards saved to <strong style="color:var(--concept);">📚 Library</strong>. Tap <strong style="color:var(--accent);">🎯 Also drill</strong> on any card you also want in the daily drill rotation.</span>
-      <button onclick="setAllConceptDrill(false)" class="btn-secondary" style="width:auto; padding:5px 10px; font-size:0.72rem; white-space:nowrap;">Drill: none</button>
-      <button onclick="setAllConceptDrill(true)" class="btn-secondary" style="width:auto; padding:5px 10px; font-size:0.72rem; white-space:nowrap;">Drill: all</button>
-    </div>`;
+  const destBanner = isDrillMode
+    ? `<div style="margin-bottom:10px; padding:10px 12px; background:rgba(99,102,241,0.08); border:1px dashed var(--surface2); border-radius:10px; font-size:0.78rem; color:var(--text-dim);">
+         Saving straight to the <strong style="color:var(--accent);">🎯 drill rotation</strong> — no Library entry.
+       </div>`
+    : `<div style="margin-bottom:10px; padding:10px 12px; background:rgba(139,92,246,0.06); border:1px dashed var(--surface2); border-radius:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span style="font-size:0.78rem; color:var(--text-dim); flex:1; min-width:200px;">All cards saved to <strong style="color:var(--concept);">📚 Library</strong>. Tap <strong style="color:var(--accent);">🎯 Also drill</strong> on any card you also want in the daily drill rotation.</span>
+        <button onclick="setAllConceptDrill(false)" class="btn-secondary" style="width:auto; padding:5px 10px; font-size:0.72rem; white-space:nowrap;">Drill: none</button>
+        <button onclick="setAllConceptDrill(true)" class="btn-secondary" style="width:auto; padding:5px 10px; font-size:0.72rem; white-space:nowrap;">Drill: all</button>
+      </div>`;
 
   preview.innerHTML = metaLine + destBanner +
     `<p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:12px;">Found ${results.length} concepts. Uncheck any you don't want to save.</p>` +
@@ -8960,7 +8973,7 @@ function renderConceptExtractionResults(results, suggestedSource, sourceFallback
       const cleanPoints = (r.points || []).map(p => p.replace(/^[•\-–—]\s*/, ''));
       const isDupe = existingTitles.has((r.title || '').toLowerCase());
       const drillOn = r.alsoDrill === true;
-      const drillPill = `<button onclick="toggleConceptDrill(${i})" id="cq-dest-${i}" title="${drillOn ? 'Remove from drill rotation' : 'Also add to drill rotation'}" style="border:none; cursor:pointer; padding:4px 10px; border-radius:12px; font-size:0.72rem; font-weight:700; white-space:nowrap; ${drillOn ? 'background:var(--accent); color:#fff;' : 'background:transparent; color:var(--text-dim); border:1px solid var(--surface2);'}">🎯 ${drillOn ? 'Also drill' : 'Also drill?'}</button>`;
+      const drillPill = isDrillMode ? '' : `<button onclick="toggleConceptDrill(${i})" id="cq-dest-${i}" title="${drillOn ? 'Remove from drill rotation' : 'Also add to drill rotation'}" style="border:none; cursor:pointer; padding:4px 10px; border-radius:12px; font-size:0.72rem; font-weight:700; white-space:nowrap; ${drillOn ? 'background:var(--accent); color:#fff;' : 'background:transparent; color:var(--text-dim); border:1px solid var(--surface2);'}">🎯 ${drillOn ? 'Also drill' : 'Also drill?'}</button>`;
       return `<div class="concept-card" style="margin-bottom:12px; ${isDupe ? 'opacity:0.5;' : ''}">
         <div style="display:flex; align-items:center; gap:8px;">
           <input type="checkbox" id="cq-check-${i}" ${isDupe ? '' : 'checked'} style="width:18px; height:18px; accent-color:var(--concept);">
@@ -9482,11 +9495,12 @@ async function polishThought() {
     const data = await response.json();
     if (!data.card) throw new Error('Empty response');
 
-    // Pipe the single card into the existing preview UI so the user can
-    // edit + pick destination + save like any other extraction.
+    // Pipe the single card into the existing preview UI. Scattered Thoughts
+    // mode skips Library entirely — cards go straight to the drill rotation.
     const elapsedMs = Date.now() - startTs;
-    const sourceLabel = sourceEl.value.trim() || 'Polished thought';
+    const sourceLabel = sourceEl.value.trim() || 'Scattered thought';
     lastExtractContext = { text: thought };
+    conceptQuickMode = 'drill';
     renderConceptExtractionResults(
       [data.card],
       sourceLabel,
@@ -9494,7 +9508,7 @@ async function polishThought() {
       'concept-panel-thought',
       { model: data.model, elapsedMs, usedGemini: false }
     );
-    showToast('Thought polished — review and save');
+    showToast('Thought polished — review and save to drill');
   } catch (err) {
     showToast('Error: ' + err.message);
   } finally {
