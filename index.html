@@ -1906,10 +1906,10 @@ textarea { resize: vertical; min-height: 80px; }
               <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (fast)</option>
             </optgroup>
             <optgroup label="Open Source (Fireworks)">
-              <option value="accounts/fireworks/models/llama4-scout-instruct-basic">Llama 4 Scout (fast & free-tier)</option>
-              <option value="accounts/fireworks/models/llama4-maverick-instruct-basic">Llama 4 Maverick (powerful)</option>
               <option value="accounts/fireworks/models/deepseek-v3-0324">DeepSeek V3 (strong reasoning)</option>
-              <option value="accounts/fireworks/models/qwen3-30b-a3b">Qwen 3 30B (efficient)</option>
+              <option value="accounts/fireworks/models/llama-v3p3-70b-instruct">Llama 3.3 70B (Meta, general)</option>
+              <option value="accounts/fireworks/models/qwen3-235b-a22b-instruct-2507">Qwen 3 235B (Alibaba, powerful)</option>
+              <option value="accounts/fireworks/models/kimi-k2p6">Kimi K2.6 (Moonshot)</option>
             </optgroup>
           </select>
         </div>
@@ -2537,10 +2537,10 @@ textarea { resize: vertical; min-height: 80px; }
         <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (fast)</option>
       </optgroup>
       <optgroup label="Open Source (Fireworks)">
-        <option value="accounts/fireworks/models/llama4-scout-instruct-basic">Llama 4 Scout (fast & free-tier)</option>
-        <option value="accounts/fireworks/models/llama4-maverick-instruct-basic">Llama 4 Maverick (powerful)</option>
         <option value="accounts/fireworks/models/deepseek-v3-0324">DeepSeek V3 (strong reasoning)</option>
-        <option value="accounts/fireworks/models/qwen3-30b-a3b">Qwen 3 30B (efficient)</option>
+        <option value="accounts/fireworks/models/llama-v3p3-70b-instruct">Llama 3.3 70B (Meta, general)</option>
+        <option value="accounts/fireworks/models/qwen3-235b-a22b-instruct-2507">Qwen 3 235B (Alibaba, powerful)</option>
+        <option value="accounts/fireworks/models/kimi-k2p6">Kimi K2.6 (Moonshot)</option>
       </optgroup>
     </select>
   </div>
@@ -8370,10 +8370,11 @@ function shortModelName(modelId) {
   if (modelId.startsWith('gpt-5.4-nano'))       return 'GPT-5.4 Nano';
   if (modelId.startsWith('gpt-5.4'))            return 'GPT-5.4';
   if (modelId.startsWith('gpt-4o'))             return 'GPT-4o';
-  if (modelId.includes('llama4-scout'))         return 'Llama 4 Scout';
-  if (modelId.includes('llama4-maverick'))      return 'Llama 4 Maverick';
+  if (modelId.includes('llama-v3p3-70b'))       return 'Llama 3.3 70B';
   if (modelId.includes('deepseek'))             return 'DeepSeek V3';
+  if (modelId.includes('qwen3-235b'))           return 'Qwen 3 235B';
   if (modelId.includes('qwen'))                 return 'Qwen 3';
+  if (modelId.includes('kimi-k2'))              return 'Kimi K2';
   return modelId;
 }
 

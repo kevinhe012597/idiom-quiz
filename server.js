@@ -165,11 +165,14 @@ const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'idiom-quiz.db');
 
 // ─── Model routing ────────────────────────────────────────────────────────
+// Fireworks serverless lineup (verified against fireworks.ai/models?serverless=true).
+// Llama 4 Scout/Maverick and Qwen 3 30B were moved to on-demand-only (dedicated
+// GPU) and 404 from the standard /v1/chat/completions endpoint, so they're out.
 const FIREWORKS_MODELS = new Set([
-  'accounts/fireworks/models/llama4-scout-instruct-basic',
-  'accounts/fireworks/models/llama4-maverick-instruct-basic',
   'accounts/fireworks/models/deepseek-v3-0324',
-  'accounts/fireworks/models/qwen3-30b-a3b',
+  'accounts/fireworks/models/llama-v3p3-70b-instruct',
+  'accounts/fireworks/models/qwen3-235b-a22b-instruct-2507',
+  'accounts/fireworks/models/kimi-k2p6',
 ]);
 
 const ANTHROPIC_MODELS = new Set([
@@ -894,7 +897,7 @@ ${existingTagsBlock(existingTags)}`;
             apiRes.on('data', chunk => { data += chunk; });
             apiRes.on('end', () => {
               if (apiRes.statusCode !== 200) {
-                console.error('concept-lookup Fireworks/chat error:', apiRes.statusCode, data.slice(0, 200));
+                console.error(`concept-lookup Fireworks/chat error: ${apiRes.statusCode} model=${model}`, data.slice(0, 200));
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: `${model} API error (${apiRes.statusCode})` }));
                 return;
