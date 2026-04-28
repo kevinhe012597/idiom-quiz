@@ -2506,11 +2506,11 @@ Return ONLY valid JSON array with this exact shape: [{"phrase":"...","category":
             try {
               const parsed = JSON.parse(data);
               const content = parsed.choices[0].message.content.trim();
-              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-              const results = JSON.parse(jsonStr);
+              const results = extractJsonArray(content);
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ results }));
             } catch (e) {
+              console.error('name-vibe parse error:', e.message, data.slice(0, 300));
               res.writeHead(500, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: 'Failed to parse response' }));
             }
@@ -2528,6 +2528,39 @@ Return ONLY valid JSON array with this exact shape: [{"phrase":"...","category":
       }
     });
     return;
+  }
+
+  // Extract a JSON array (or wrapped {results:[...]} object) from a model
+  // response that may be wrapped in markdown fences, prose preamble, or even
+  // returned as a top-level object. Tolerant to common formatting variation
+  // across OpenAI / Anthropic / Fireworks model output styles.
+  function extractJsonArray(content) {
+    if (!content) throw new Error('Empty content');
+    let s = content.trim();
+    // Strip markdown code fences
+    s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
+    // First attempt: parse as-is
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && Array.isArray(parsed.results)) return parsed.results;
+    } catch (_) { /* fall through */ }
+    // Second attempt: slice from first '[' to last ']'
+    const a = s.indexOf('[');
+    const b = s.lastIndexOf(']');
+    if (a !== -1 && b > a) {
+      try { return JSON.parse(s.slice(a, b + 1)); } catch (_) { /* fall through */ }
+    }
+    // Third attempt: maybe a {results:[...]} object wrapped in prose
+    const oa = s.indexOf('{');
+    const ob = s.lastIndexOf('}');
+    if (oa !== -1 && ob > oa) {
+      try {
+        const obj = JSON.parse(s.slice(oa, ob + 1));
+        if (obj && Array.isArray(obj.results)) return obj.results;
+      } catch (_) { /* fall through */ }
+    }
+    throw new Error('Could not locate a JSON array in the response');
   }
 
   if (req.method === 'POST' && req.url === '/api/reverse-lookup') {
@@ -2574,11 +2607,11 @@ Return ONLY valid JSON array with this exact shape: [{"phrase":"...","category":
             try {
               const parsed = JSON.parse(data);
               const content = parsed.choices[0].message.content.trim();
-              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-              const results = JSON.parse(jsonStr);
+              const results = extractJsonArray(content);
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ results }));
             } catch (e) {
+              console.error('reverse-lookup parse error:', e.message, data.slice(0, 300));
               res.writeHead(500, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: 'Failed to parse response' }));
             }
