@@ -1908,7 +1908,7 @@ textarea { resize: vertical; min-height: 80px; }
             <optgroup label="Open Source (Fireworks)">
               <option value="accounts/fireworks/models/deepseek-v3p2">DeepSeek V3.2 (strong reasoning)</option>
               <option value="accounts/fireworks/models/llama-v3p3-70b-instruct">Llama 3.3 70B (Meta, general)</option>
-              <option value="accounts/fireworks/models/qwen3-235b-a22b-instruct-2507">Qwen 3 235B (Alibaba, powerful)</option>
+              <option value="accounts/fireworks/models/qwen3p6-plus">Qwen 3.6 Plus (Alibaba)</option>
               <option value="accounts/fireworks/models/kimi-k2p6">Kimi K2.6 (Moonshot)</option>
             </optgroup>
           </select>
@@ -2539,7 +2539,7 @@ textarea { resize: vertical; min-height: 80px; }
       <optgroup label="Open Source (Fireworks)">
         <option value="accounts/fireworks/models/deepseek-v3p2">DeepSeek V3.2 (strong reasoning)</option>
         <option value="accounts/fireworks/models/llama-v3p3-70b-instruct">Llama 3.3 70B (Meta, general)</option>
-        <option value="accounts/fireworks/models/qwen3-235b-a22b-instruct-2507">Qwen 3 235B (Alibaba, powerful)</option>
+        <option value="accounts/fireworks/models/qwen3p6-plus">Qwen 3.6 Plus (Alibaba)</option>
         <option value="accounts/fireworks/models/kimi-k2p6">Kimi K2.6 (Moonshot)</option>
       </optgroup>
     </select>
@@ -8372,6 +8372,7 @@ function shortModelName(modelId) {
   if (modelId.startsWith('gpt-4o'))             return 'GPT-4o';
   if (modelId.includes('llama-v3p3-70b'))       return 'Llama 3.3 70B';
   if (modelId.includes('deepseek'))             return 'DeepSeek V3';
+  if (modelId.includes('qwen3p6'))              return 'Qwen 3.6 Plus';
   if (modelId.includes('qwen3-235b'))           return 'Qwen 3 235B';
   if (modelId.includes('qwen'))                 return 'Qwen 3';
   if (modelId.includes('kimi-k2'))              return 'Kimi K2';

@@ -171,7 +171,7 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'idiom-quiz.db');
 const FIREWORKS_MODELS = new Set([
   'accounts/fireworks/models/deepseek-v3p2',
   'accounts/fireworks/models/llama-v3p3-70b-instruct',
-  'accounts/fireworks/models/qwen3-235b-a22b-instruct-2507',
+  'accounts/fireworks/models/qwen3p6-plus',
   'accounts/fireworks/models/kimi-k2p6',
 ]);
 
