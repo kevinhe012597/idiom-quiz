@@ -9139,8 +9139,10 @@ async function doMultiConceptLookup(queries) {
   // Note source label: "Multi-lookup" by default; user can edit on the preview.
   const sourceLabel = `Multi-lookup (${successCards.length} concept${successCards.length === 1 ? '' : 's'})`;
   lastExtractContext = { text: queries.join('\n') };
-  // Default to library mode (the standard concept extraction default)
-  conceptQuickMode = 'library';
+  // Multi-lookup goes straight to drill — same as Scattered Thoughts.
+  // The user is intentionally adding things to remember, not stashing
+  // background reading, so Library would be the wrong default here.
+  conceptQuickMode = 'drill';
   showScreen('concept-add-edit');
   showConceptAddForm();
   switchConceptTab('article');
