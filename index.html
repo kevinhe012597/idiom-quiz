@@ -8100,16 +8100,67 @@ function openLibraryEntry(source) {
       const tagPills = (c.tags || []).map(t =>
         `<span style="font-size:0.7rem; padding:2px 8px; border-radius:10px; background:rgba(139,92,246,0.12); color:var(--concept); font-weight:600;">${escapeHtml(t)}</span>`
       ).join(' ');
+      // Per-card actions: send to drill (only if not already drillable) + delete this card.
+      // c.bucket === 'library' means Library-only; anything else (incl. undefined or 'nope'/'kinda'/'nailed') is in the drill rotation.
+      const inDrill = c.bucket !== 'library';
+      const sendToDrillBtn = inDrill
+        ? `<span style="font-size:0.72rem; color:var(--green); font-weight:600; padding:5px 10px;">✓ In drill</span>`
+        : `<button onclick="libraryCardSendToDrill('${c.id}')" class="btn-secondary" style="width:auto; padding:5px 10px; font-size:0.75rem; white-space:nowrap;" title="Add this card to your daily drill rotation (still stays in Library)">🎯 Send to drill</button>`;
       return `<div class="concept-card" style="margin-bottom:14px; padding:16px;">
-        <div style="font-size:1.15rem; font-weight:700; color:var(--text); line-height:1.3;">${escapeHtml(c.title || 'Untitled')}</div>
+        <div style="display:flex; align-items:flex-start; gap:8px;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:1.15rem; font-weight:700; color:var(--text); line-height:1.3;">${escapeHtml(c.title || 'Untitled')}</div>
+          </div>
+          <button onclick="libraryCardDelete('${c.id}')" class="qa-remove-btn" title="Delete this card permanently" aria-label="Delete">×</button>
+        </div>
         ${tagPills ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:5px;">${tagPills}</div>` : ''}
         <div style="margin-top:12px; font-size:0.92rem; line-height:1.65;">
           ${points.map(p => `<div style="margin-bottom:6px;">${renderPoint(p)}</div>`).join('')}
+        </div>
+        <div style="margin-top:10px; display:flex; gap:6px; align-items:center;">
+          ${sendToDrillBtn}
         </div>
       </div>`;
     }).join('');
   }
   showScreen('library-entry');
+}
+
+// Promote a single card from a Library entry into the drill rotation.
+// The card stays in Library (inLibrary remains true) — bucket flips from
+// 'library' to undefined so drill picks it up.
+function libraryCardSendToDrill(cardId) {
+  const c = concepts.find(x => x.id === cardId);
+  if (!c) return;
+  if (c.bucket !== 'library') {
+    showToast('Already in drill rotation');
+    return;
+  }
+  c.bucket = undefined;
+  // Reset SRS schedule so it gets surfaced soon
+  c.nextReview = getToday();
+  c.lastReview = null;
+  c.interval = 0;
+  c.repetitions = 0;
+  if (!c.easeFactor) c.easeFactor = 2.5;
+  c.lastModified = new Date().toISOString();
+  saveConcepts(concepts);
+  showToast(`Sent "${(c.title || '').slice(0, 40)}" to drill`);
+  if (libraryEntrySource) openLibraryEntry(libraryEntrySource); // re-render
+}
+
+// Delete a single card from a Library entry. Removes it from concepts entirely.
+function libraryCardDelete(cardId) {
+  const c = concepts.find(x => x.id === cardId);
+  if (!c) return;
+  const title = (c.title || 'Untitled').slice(0, 60);
+  let msg = `Delete "${title}"?`;
+  if (c.bucket !== 'library') msg += `\n\n⚠️ This card is also in your drill rotation — its drill progress will be lost.`;
+  if (!confirm(msg)) return;
+  concepts = concepts.filter(x => x.id !== cardId);
+  saveConcepts(concepts);
+  showToast('Card deleted');
+  if (libraryEntrySource) openLibraryEntry(libraryEntrySource); // re-render (or land on empty state)
 }
 
 // Delete a Library entry — removes every card associated with the source.
