@@ -3047,7 +3047,7 @@ textarea { resize: vertical; min-height: 80px; }
     </div>
     <div id="dossier-extract-body" style="display:none; margin-top:8px;">
       <p style="font-size:0.78rem; color:var(--text-dim); margin:0 0 6px 0;">Dump a rough summary of a meeting/call/lunch. AI will polish it into 3-7 bullets and save as one note.</p>
-      <textarea id="dossier-extract-input" rows="6" placeholder="e.g. 'Just had lunch with Henry at Tartine. He's now at Sequoia leading enterprise SaaS deals — joined in February from Bain. Mentioned he's been looking at AI-infra deals, especially companies building serving infrastructure for inference. Asked me about my GSB thesis. Wants to grab coffee in 2 weeks before he heads to Tokyo for a deal.'" style="width:100%; padding:10px 12px; font-size:0.9rem; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
+      <textarea id="dossier-extract-input" rows="14" placeholder="e.g. 'Just had lunch with Henry at Tartine. He's now at Sequoia leading enterprise SaaS deals — joined in February from Bain. Mentioned he's been looking at AI-infra deals, especially companies building serving infrastructure for inference. Asked me about my GSB thesis. Wants to grab coffee in 2 weeks before he heads to Tokyo for a deal.'" style="width:100%; min-height:280px; padding:10px 12px; font-size:0.9rem; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
       <div style="display:flex; gap:6px; margin-top:6px;">
         <input type="text" id="dossier-extract-occasion" placeholder='Occasion (optional, e.g. "lunch at Tartine on 5/1")' style="flex:1; padding:8px 12px; font-size:0.85rem; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text);">
         <button onclick="dossierExtractMeeting()" id="dossier-extract-btn" class="btn-primary" style="width:auto; padding:8px 18px; font-size:0.85rem;">Extract</button>
@@ -8593,14 +8593,15 @@ function openDossierEntity(id) {
   } else {
     notesList.innerHTML = notes.map(n => {
       const d = n.createdAt ? new Date(n.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
-      return `<div class="dossier-note">
+      return `<div class="dossier-note" data-note-id="${n.id}">
         <div class="dossier-note-meta">
           <span class="dossier-note-date">${escapeHtml(d)}</span>
           ${n.source ? `<span class="dossier-note-source">· ${escapeHtml(n.source)}</span>` : ''}
           <div style="flex:1;"></div>
+          <button class="dossier-note-delete" onclick="dossierEditNote('${n.id}')" title="Edit this note" style="margin-right:6px;">✎</button>
           <button class="dossier-note-delete" onclick="dossierDeleteNote('${n.id}')" title="Delete this note">🗑</button>
         </div>
-        <div class="dossier-note-body">${renderPoint(n.body || '')}</div>
+        <div class="dossier-note-body" id="dossier-note-body-${n.id}">${renderPoint(n.body || '')}</div>
       </div>`;
     }).join('');
   }
@@ -8732,6 +8733,61 @@ function dossierSaveExtractedNote() {
   document.getElementById('dossier-extract-occasion').value = '';
   document.getElementById('dossier-extract-preview').style.display = 'none';
   // Re-render the entity view so the new note appears in the feed
+  openDossierEntity(dossierEntityId);
+}
+
+// Inline-edit a note: replace the rendered body with a textarea + save/cancel.
+// Also exposes ✨ Polish so the user can clean up an edited rough version
+// without copy-pasting it elsewhere.
+function dossierEditNote(noteId) {
+  const e = dossierFindById(dossierEntityId);
+  if (!e) return;
+  const note = (e.notes || []).find(n => n.id === noteId);
+  if (!note) return;
+  const bodyEl = document.getElementById('dossier-note-body-' + noteId);
+  if (!bodyEl) return;
+  const sourceVal = note.source || '';
+  bodyEl.innerHTML = `
+    <textarea id="dossier-note-edit-body-${noteId}" rows="6" style="width:100%; padding:8px 10px; font-size:0.92rem; line-height:1.55; border:1px solid var(--surface2); border-radius:8px; background:var(--bg); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
+    <input type="text" id="dossier-note-edit-source-${noteId}" placeholder="Source (optional)" style="width:100%; margin-top:6px; padding:6px 10px; font-size:0.82rem; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text); box-sizing:border-box;">
+    <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
+      <button onclick="dossierSaveNoteEdit('${noteId}')" class="btn-primary" style="width:auto; padding:6px 14px; font-size:0.8rem;">Save</button>
+      <button onclick="dossierCancelNoteEdit('${noteId}')" class="btn-secondary" style="width:auto; padding:6px 12px; font-size:0.8rem;">Cancel</button>
+      <div style="flex:1;"></div>
+      <button type="button" onclick="polishTextarea('dossier-note-edit-body-${noteId}', () => document.getElementById('dossier-entity-name')?.textContent || '')" class="btn-secondary" style="width:auto; padding:6px 10px; font-size:0.75rem;" title="Polish the edited text — preserves meaning + voice">✨ Polish</button>
+    </div>
+  `;
+  // Populate via .value (avoids HTML-encoding issues with the body content)
+  const ta = document.getElementById('dossier-note-edit-body-' + noteId);
+  if (ta) {
+    ta.value = note.body || '';
+    ta.rows = Math.max(4, Math.min(20, (note.body || '').split('\n').length + 1));
+    ta.focus();
+  }
+  const srcInput = document.getElementById('dossier-note-edit-source-' + noteId);
+  if (srcInput) srcInput.value = sourceVal;
+}
+
+function dossierCancelNoteEdit(noteId) {
+  // Re-render the entity view to restore the original
+  if (dossierEntityId) openDossierEntity(dossierEntityId);
+}
+
+function dossierSaveNoteEdit(noteId) {
+  const e = dossierFindById(dossierEntityId);
+  if (!e) return;
+  const note = (e.notes || []).find(n => n.id === noteId);
+  if (!note) return;
+  const ta = document.getElementById('dossier-note-edit-body-' + noteId);
+  const srcInput = document.getElementById('dossier-note-edit-source-' + noteId);
+  if (!ta) return;
+  const newBody = (ta.value || '').trim();
+  if (!newBody) { showToast('Note body can\'t be empty'); return; }
+  note.body = newBody;
+  note.source = srcInput && srcInput.value.trim() ? srcInput.value.trim() : undefined;
+  e.lastModified = new Date().toISOString();
+  saveDossier();
+  showToast('Note updated');
   openDossierEntity(dossierEntityId);
 }
 
