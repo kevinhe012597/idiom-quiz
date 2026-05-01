@@ -7092,7 +7092,9 @@ function renderQuickAddPreview() {
   confirmBtn.textContent = `Add ${newCount} Card${newCount !== 1 ? 's' : ''}`;
   confirmBtn.disabled = newCount === 0;
 
-  preview.innerHTML = quickAddResults.map((r, i) => `
+  preview.innerHTML = quickAddResults.map((r, i) => {
+    const safePhraseAttr = (r.phrase || '').replace(/'/g, "\\'");
+    return `
     <div class="qa-card ${r.isDupe ? 'is-dupe' : ''}" data-qa-index="${i}">
       <div class="qa-card-header">
         <input type="text" class="qa-phrase-input" id="qa-phrase-${i}" value="${escapeHtml(r.phrase)}" oninput="quickAddUpdatePhrase(${i}, this.value)" placeholder="Phrase or word">
@@ -7106,8 +7108,9 @@ function renderQuickAddPreview() {
         <span class="example-text" id="qa-example-${i}">${escapeHtml(r.example)}</span>
         <button class="regen-btn" onclick="quickAddRegenExample(${i})" id="qa-regen-${i}">↻ New example</button>
       </div>
-    </div>
-  `).join('');
+      ${r.isDupe ? `<button class="btn-secondary" onclick="bumpCardToRecent('${safePhraseAttr}', this)" style="margin-top:8px; width:100%; font-size:0.82rem; padding:7px;" title="This word's already in your deck. Bump its date so it shows up in your Recent (15-day) drill again.">↑ Bump to Recent (15-day quiz)</button>` : ''}
+    </div>`;
+  }).join('');
 
   // If the user removed every card, drop back to step 1 so they can paste/upload again.
   if (quickAddResults.length === 0) {

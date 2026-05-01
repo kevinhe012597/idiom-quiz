@@ -1024,6 +1024,40 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ─── Export everything ──────────────────────────────────────────────────
+  // Returns one JSON blob with cards + concepts + dossier_entities +
+  // scratchpad + lookup_usage. Bookmark this URL and download the file
+  // weekly for a manual safety net under your control.
+  if (req.method === 'GET' && req.url.startsWith('/api/export-all')) {
+    try {
+      const cardsRow = (() => { try { const r = selectAppStateStmt.get('cards'); return r && r.value ? JSON.parse(r.value) : []; } catch { return []; } })();
+      const concepts = (() => { try { const r = selectAppStateStmt.get('concepts'); return r && r.value ? JSON.parse(r.value) : []; } catch { return []; } })();
+      const dossier = (() => { try { const r = selectAppStateStmt.get('dossier_entities'); return r && r.value ? JSON.parse(r.value) : []; } catch { return []; } })();
+      const scratchpad = (() => { try { const r = selectAppStateStmt.get('scratchpad'); return r && r.value ? r.value : ''; } catch { return ''; } })();
+      const lookupUsage = (() => { try { const r = selectAppStateStmt.get('lookup_usage'); return r && r.value ? JSON.parse(r.value) : {}; } catch { return {}; } })();
+      const out = {
+        exportedAt: new Date().toISOString(),
+        version: 1,
+        cards: cardsRow,
+        concepts,
+        dossier_entities: dossier,
+        scratchpad,
+        lookup_usage: lookupUsage,
+      };
+      const filename = `lexicon-export-${new Date().toISOString().slice(0, 10)}.json`;
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      });
+      res.end(JSON.stringify(out, null, 2));
+    } catch (err) {
+      console.error('Export error:', err.message);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
   // Health check
   if (req.method === 'GET' && req.url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
