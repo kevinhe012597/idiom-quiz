@@ -7440,6 +7440,24 @@ function stripBullet(str) {
 //   `code` → <code>
 //   [text](url) → clickable link (and strips outer parens around citations)
 // All input is HTML-escaped first so user/AI text can never inject tags.
+// Render a multi-line note body. If any line is a bulleted line (starts
+// with •/-/* etc), the whole thing renders as a <ul>; otherwise it falls
+// through to the regular renderPoint single-line path. Used by dossier
+// note bodies where extracted-meeting notes save as "• bullet1\n• bullet2".
+function renderNoteBody(str) {
+  if (!str) return '';
+  const lines = str.split('\n');
+  const looksBulleted = lines.some(l => /^\s*[•\-–—*]\s+/.test(l));
+  if (!looksBulleted) {
+    // Plain note — preserve paragraphs via <br> but render markdown per line
+    return lines.map(l => l.trim() ? renderPoint(l) : '').join('<br>');
+  }
+  // Bulleted note: each non-blank line is an <li>, ignore stray empties.
+  return '<ul style="margin:0; padding-left:18px;">' +
+    lines.filter(l => l.trim()).map(l => `<li style="margin-bottom:4px;">${renderPoint(l)}</li>`).join('') +
+    '</ul>';
+}
+
 function renderPoint(str) {
   let s = escapeHtml(stripBullet(str));
   // Strip outer parens that often wrap citation links: ([text](url)) → [text](url)
@@ -8604,7 +8622,7 @@ function openDossierEntity(id) {
           <button class="dossier-note-delete" onclick="dossierEditNote('${n.id}')" title="Edit this note" style="margin-right:6px;">✎</button>
           <button class="dossier-note-delete" onclick="dossierDeleteNote('${n.id}')" title="Delete this note">🗑</button>
         </div>
-        <div class="dossier-note-body" id="dossier-note-body-${n.id}">${renderPoint(n.body || '')}</div>
+        <div class="dossier-note-body" id="dossier-note-body-${n.id}">${renderNoteBody(n.body || '')}</div>
       </div>`;
     }).join('');
   }
