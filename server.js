@@ -1981,6 +1981,124 @@ ${notesText}`;
   }
 
   // ─── Dossier AI: pre-meeting brief (one-pager from all notes) ────────────
+  // ─── Dossier AI: extract polished bullets from a meeting transcript ──────
+  // User dictates a rough summary of a meeting/call; AI returns 3-7 polished
+  // bullets that can be saved as a single dossier note.
+  if (req.method === 'POST' && req.url === '/api/dossier-extract-meeting') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body);
+        const { entity, transcript, occasion } = _body;
+        if (!entity || typeof entity !== 'object' || !entity.name) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing entity' }));
+          return;
+        }
+        if (!transcript || typeof transcript !== 'string' || transcript.trim().length < 10) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing or too-short transcript' }));
+          return;
+        }
+        const usedModel = pickAnthropicModel(_body);
+        const isPerson = entity.type === 'person';
+        const occasionLine = occasion && occasion.trim() ? `\nOccasion: "${occasion.trim()}"` : '';
+
+        const extractTool = {
+          name: 'save_meeting_bullets',
+          description: 'Save the polished meeting-summary bullets.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              bullets: {
+                type: 'array',
+                items: { type: 'string' },
+                description: '3-7 polished bullets capturing distinct facts, quotes, decisions, or follow-ups from the transcript. Each is one clean sentence (or short two). NO bullet character prefix — just the text. NEVER invent facts not in the transcript.',
+              },
+              suggestedSource: {
+                type: 'string',
+                description: 'Short label for this meeting, e.g. "Lunch on May 1" or "Phone call · 5/1". Inferred from the transcript or occasion. Under 50 chars.',
+              },
+            },
+            required: ['bullets', 'suggestedSource'],
+          },
+        };
+
+        const systemPrompt = `You are extracting key points from a meeting summary the user just dictated about a ${isPerson ? 'person' : 'firm'} they keep a private dossier on.
+
+CRITICAL RULES:
+- Stay strictly within what the transcript says. Do NOT invent facts, names, or details.
+- Polish the user's rough phrasing into clean, readable sentences. Keep the user's voice (first person where they used it).
+- Generate 3-7 bullets. If the transcript is sparse, return fewer — do NOT pad.
+- Each bullet captures ONE distinct fact, quote, decision, or follow-up. Combine related details into one bullet rather than splintering.
+- Output bullets WITHOUT a leading "•" or "-" character — just the text. The client will format.
+- Voice: factual, like a personal-CRM note recap. Not a memo, not an essay.
+
+Also suggest a short source label (suggestedSource) for this meeting — inferred from the occasion or transcript content. Under 50 chars.
+
+ENTITY CONTEXT (for proper-noun spelling and continuity):
+Name: ${entity.name}
+Type: ${isPerson ? 'Person' : 'Firm'}${occasionLine}`;
+
+        const anthropicPayload = JSON.stringify({
+          model: usedModel,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: `Extract the key points from this meeting summary:\n\n"""${transcript.trim()}"""` }],
+          max_tokens: 2000,
+          tools: [extractTool],
+          tool_choice: { type: 'tool', name: 'save_meeting_bullets' },
+        });
+
+        const httpsLib = require('https');
+        const apiReq = httpsLib.request({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(anthropicPayload),
+          },
+        }, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('dossier-extract-meeting Anthropic error:', apiRes.statusCode, data.slice(0, 300));
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `Extract failed (HTTP ${apiRes.statusCode})` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const toolUse = (parsed.content || []).find(b => b.type === 'tool_use' && b.name === 'save_meeting_bullets');
+              if (!toolUse || !toolUse.input) throw new Error('No tool_use in response');
+              const out = toolUse.input;
+              const bullets = Array.isArray(out.bullets) ? out.bullets.map(b => (b || '').replace(/^[•\-–—]\s*/, '').trim()).filter(Boolean) : [];
+              const suggestedSource = (out.suggestedSource || '').trim().slice(0, 60);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ bullets, suggestedSource, model: usedModel }));
+            } catch (e) {
+              console.error('dossier-extract-meeting parse error:', e.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(anthropicPayload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/dossier-brief') {
     let body = '';
     req.on('data', chunk => { body += chunk; });

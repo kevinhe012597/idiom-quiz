@@ -3039,6 +3039,33 @@ textarea { resize: vertical; min-height: 80px; }
     </div>
   </div>
 
+  <!-- Extract from meeting transcript -->
+  <div class="dossier-section">
+    <div class="dossier-section-header" style="margin-bottom:8px;">
+      <span style="font-size:0.78rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">📋 Extract from meeting</span>
+      <button onclick="dossierToggleExtractMeeting()" id="dossier-extract-toggle" style="background:none; border:none; color:var(--dossier); font-size:0.78rem; cursor:pointer; font-weight:600;">+ Open</button>
+    </div>
+    <div id="dossier-extract-body" style="display:none; margin-top:8px;">
+      <p style="font-size:0.78rem; color:var(--text-dim); margin:0 0 6px 0;">Dump a rough summary of a meeting/call/lunch. AI will polish it into 3-7 bullets and save as one note.</p>
+      <textarea id="dossier-extract-input" rows="6" placeholder="e.g. 'Just had lunch with Henry at Tartine. He's now at Sequoia leading enterprise SaaS deals — joined in February from Bain. Mentioned he's been looking at AI-infra deals, especially companies building serving infrastructure for inference. Asked me about my GSB thesis. Wants to grab coffee in 2 weeks before he heads to Tokyo for a deal.'" style="width:100%; padding:10px 12px; font-size:0.9rem; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
+      <div style="display:flex; gap:6px; margin-top:6px;">
+        <input type="text" id="dossier-extract-occasion" placeholder='Occasion (optional, e.g. "lunch at Tartine on 5/1")' style="flex:1; padding:8px 12px; font-size:0.85rem; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text);">
+        <button onclick="dossierExtractMeeting()" id="dossier-extract-btn" class="btn-primary" style="width:auto; padding:8px 18px; font-size:0.85rem;">Extract</button>
+      </div>
+      <!-- Preview area populated after extraction -->
+      <div id="dossier-extract-preview" style="display:none; margin-top:10px; padding:10px 12px; background:var(--surface); border:1px dashed var(--dossier); border-radius:10px;">
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+          <span style="font-size:0.7rem; color:var(--dossier); font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">Preview — edit before saving</span>
+        </div>
+        <textarea id="dossier-extract-bullets" rows="6" style="width:100%; padding:8px 10px; font-size:0.88rem; line-height:1.55; border:1px solid var(--surface2); border-radius:8px; background:var(--bg); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
+        <div style="display:flex; gap:6px; margin-top:6px;">
+          <input type="text" id="dossier-extract-source" placeholder="Source label" style="flex:1; padding:8px 12px; font-size:0.85rem; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text);">
+          <button onclick="dossierSaveExtractedNote()" class="btn-primary" style="width:auto; padding:8px 18px; font-size:0.85rem;">Save as note</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Note feed -->
   <div class="dossier-section" id="dossier-notes-section">
     <div class="dossier-section-header">
@@ -8611,6 +8638,101 @@ async function dossierAddNote() {
   saveDossier();
   showToast('Note saved');
   openDossierEntity(dossierEntityId); // re-render
+}
+
+// ─── Extract from meeting transcript ─────────────────────────────────────
+// Toggle the collapsed extract section; reset state when collapsing.
+function dossierToggleExtractMeeting() {
+  const body = document.getElementById('dossier-extract-body');
+  const toggle = document.getElementById('dossier-extract-toggle');
+  if (!body || !toggle) return;
+  const isOpen = body.style.display !== 'none';
+  if (isOpen) {
+    body.style.display = 'none';
+    toggle.textContent = '+ Open';
+  } else {
+    body.style.display = 'block';
+    toggle.textContent = '− Close';
+    // Clear preview from any previous run
+    document.getElementById('dossier-extract-preview').style.display = 'none';
+    document.getElementById('dossier-extract-bullets').value = '';
+    document.getElementById('dossier-extract-source').value = '';
+  }
+}
+
+async function dossierExtractMeeting() {
+  const e = dossierFindById(dossierEntityId);
+  if (!e) return;
+  const ta = document.getElementById('dossier-extract-input');
+  const occasionEl = document.getElementById('dossier-extract-occasion');
+  const transcript = (ta.value || '').trim();
+  if (transcript.length < 10) { showToast('Drop a longer summary first'); return; }
+
+  const btn = document.getElementById('dossier-extract-btn');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Extracting…';
+
+  try {
+    const resp = await apiFetch('/api/dossier-extract-meeting', {
+      entity: e,
+      transcript,
+      occasion: occasionEl.value.trim() || undefined,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    const bullets = Array.isArray(data.bullets) ? data.bullets : [];
+    if (bullets.length === 0) throw new Error('No bullets returned');
+
+    // Show preview — bullets formatted with leading "• " for editability
+    const preview = document.getElementById('dossier-extract-preview');
+    const bulletsTa = document.getElementById('dossier-extract-bullets');
+    const sourceEl = document.getElementById('dossier-extract-source');
+    bulletsTa.value = bullets.map(b => '• ' + b).join('\n');
+    bulletsTa.rows = Math.max(4, bullets.length + 1);
+    sourceEl.value = data.suggestedSource || occasionEl.value.trim() || '';
+    preview.style.display = 'block';
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
+function dossierSaveExtractedNote() {
+  const e = dossierFindById(dossierEntityId);
+  if (!e) return;
+  const bulletsTa = document.getElementById('dossier-extract-bullets');
+  const sourceEl = document.getElementById('dossier-extract-source');
+  // Parse bullets — one per line, strip leading bullet character
+  const bullets = (bulletsTa.value || '')
+    .split('\n')
+    .map(s => s.replace(/^\s*[•\-–—*]\s*/, '').trim())
+    .filter(Boolean);
+  if (bullets.length === 0) { showToast('Empty — nothing to save'); return; }
+  // Save as a single note with markdown bullet body so it renders as a list
+  const body = bullets.map(b => '• ' + b).join('\n');
+  const note = {
+    id: generateId(),
+    body,
+    source: sourceEl.value.trim() || undefined,
+    createdAt: new Date().toISOString(),
+  };
+  if (!e.notes) e.notes = [];
+  e.notes.push(note);
+  e.lastModified = new Date().toISOString();
+  saveDossier();
+  showToast(`Saved ${bullets.length} bullet${bullets.length === 1 ? '' : 's'} as a note`);
+  // Reset extract UI for the next round
+  document.getElementById('dossier-extract-input').value = '';
+  document.getElementById('dossier-extract-occasion').value = '';
+  document.getElementById('dossier-extract-preview').style.display = 'none';
+  // Re-render the entity view so the new note appears in the feed
+  openDossierEntity(dossierEntityId);
 }
 
 function dossierDeleteNote(noteId) {
