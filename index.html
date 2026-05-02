@@ -3554,13 +3554,30 @@ function scheduleServerCardSync() {
 // classic "two devices PUT a stale snapshot, last one clobbers earlier adds"
 // bug. (Deletes-on-one-device can resurrect from the other's stale state;
 // that's a known follow-up requiring tombstones.)
+// Merge two arrays by id with TOMBSTONE semantics:
+// - For each id, local overrides remote (since local just made an edit).
+// - BUT: if EITHER side marked the row deleted, the merged version stays
+//   deleted, with the newer deletedAt winning. This way a delete on one
+//   device propagates instead of getting resurrected by the other side's
+//   stale local copy.
 function mergeCardArraysById(localArr, remoteArr) {
   const byId = new Map();
   for (const c of (remoteArr || [])) {
     if (c && c.id) byId.set(c.id, c);
   }
   for (const c of (localArr || [])) {
-    if (c && c.id) byId.set(c.id, c); // local overrides remote on same id
+    if (!c || !c.id) continue;
+    const existing = byId.get(c.id);
+    if (existing && (existing.deleted || c.deleted)) {
+      // Tombstone wins. Carry the latest deletedAt + the most-recent body so
+      // a future "restore" surfaces the right content.
+      const existingDel = existing.deleted ? new Date(existing.deletedAt || 0).getTime() : 0;
+      const localDel = c.deleted ? new Date(c.deletedAt || 0).getTime() : 0;
+      const winner = localDel >= existingDel ? c : existing;
+      byId.set(c.id, { ...winner, deleted: true, deletedAt: winner.deletedAt || new Date().toISOString() });
+    } else {
+      byId.set(c.id, c); // local wins on regular collisions
+    }
   }
   return [...byId.values()];
 }
@@ -7970,11 +7987,13 @@ function updateConceptsDashboard() {
   const _now = new Date();
   const todayCutoff = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate()).getTime();
 
-  // Total counts every concept (Library cards live alongside drill cards now,
-  // not in a separate compartment). Activity tiles count everything too.
+  // Total counts every live concept (skip soft-deleted). Activity tiles too.
   let weekCount = 0;
   let todayCount = 0;
+  let totalLive = 0;
   concepts.forEach(c => {
+    if (c.deleted) return;
+    totalLive++;
     if (c.createdAt) {
       const t = new Date(c.createdAt).getTime();
       if (!isNaN(t) && t >= weekCutoff) weekCount++;
@@ -7985,7 +8004,7 @@ function updateConceptsDashboard() {
   const totalEl = document.getElementById('kb-total');
   const weekEl = document.getElementById('kb-week');
   const todayEl = document.getElementById('kb-today');
-  if (totalEl) totalEl.textContent = concepts.length;
+  if (totalEl) totalEl.textContent = totalLive;
   if (weekEl) weekEl.textContent = weekCount;
   if (todayEl) todayEl.textContent = todayCount;
 
@@ -7993,7 +8012,7 @@ function updateConceptsDashboard() {
   const recentList = document.getElementById('kb-recent-list');
   if (recentList) {
     const recent = [...concepts]
-      .filter(c => c.createdAt)
+      .filter(c => !c.deleted && c.createdAt)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 5);
     if (recent.length === 0) {
@@ -8085,6 +8104,7 @@ function renderLibraryIndex() {
   // Cards can be in BOTH Library and the drill rotation.
   const bySource = new Map();
   for (const c of concepts) {
+    if (c.deleted) continue; // skip soft-deleted cards
     if (!c.inLibrary) continue;
     const key = (c.source || 'Untitled source').trim() || 'Untitled source';
     if (!bySource.has(key)) bySource.set(key, []);
@@ -8127,7 +8147,8 @@ let libraryEntrySource = null;
 
 function openLibraryEntry(source) {
   libraryEntrySource = source;
-  const cards = concepts.filter(c => c.inLibrary && (c.source || '').trim() === source).sort((a, b) => {
+  // Skip soft-deleted cards
+  const cards = concepts.filter(c => !c.deleted && c.inLibrary && (c.source || '').trim() === source).sort((a, b) => {
     return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
   });
 
@@ -8148,8 +8169,6 @@ function openLibraryEntry(source) {
       const tagPills = (c.tags || []).map(t =>
         `<span style="font-size:0.7rem; padding:2px 8px; border-radius:10px; background:rgba(139,92,246,0.12); color:var(--concept); font-weight:600;">${escapeHtml(t)}</span>`
       ).join(' ');
-      // Per-card actions: send to drill (only if not already drillable) + delete this card.
-      // c.bucket === 'library' means Library-only; anything else (incl. undefined or 'nope'/'kinda'/'nailed') is in the drill rotation.
       const inDrill = c.bucket !== 'library';
       const sendToDrillBtn = inDrill
         ? `<span style="font-size:0.72rem; color:var(--green); font-weight:600; padding:5px 10px;">✓ In drill</span>`
@@ -8159,12 +8178,13 @@ function openLibraryEntry(source) {
           <div style="flex:1; min-width:0;">
             <div style="font-size:1.15rem; font-weight:700; color:var(--text); line-height:1.3;">${escapeHtml(c.title || 'Untitled')}</div>
           </div>
-          <button onclick="libraryCardDelete('${c.id}')" class="qa-remove-btn" title="Delete this card permanently" aria-label="Delete">×</button>
+          <button onclick="editConcept('${c.id}')" class="qa-remove-btn" title="Edit this card" aria-label="Edit" style="font-size:0.85rem;">✎</button>
+          <button onclick="libraryCardDelete('${c.id}')" class="qa-remove-btn" title="Delete this card" aria-label="Delete">×</button>
         </div>
         ${tagPills ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:5px;">${tagPills}</div>` : ''}
-        <div style="margin-top:12px; font-size:0.92rem; line-height:1.65;">
-          ${points.map(p => `<div style="margin-bottom:6px;">${renderPoint(p)}</div>`).join('')}
-        </div>
+        ${points.length > 0 ? `<ul style="margin-top:12px; margin-bottom:0; padding-left:20px; font-size:0.92rem; line-height:1.65;">
+          ${points.map(p => `<li style="margin-bottom:6px;">${renderPoint(p)}</li>`).join('')}
+        </ul>` : ''}
         <div style="margin-top:10px; display:flex; gap:6px; align-items:center;">
           ${sendToDrillBtn}
         </div>
@@ -8197,7 +8217,9 @@ function libraryCardSendToDrill(cardId) {
   if (libraryEntrySource) openLibraryEntry(libraryEntrySource); // re-render
 }
 
-// Delete a single card from a Library entry. Removes it from concepts entirely.
+// Delete a single card from a Library entry. Soft-deletes (marks deleted=true
+// + deletedAt) so the merge sync can carry the tombstone across devices
+// instead of resurrecting the card.
 function libraryCardDelete(cardId) {
   const c = concepts.find(x => x.id === cardId);
   if (!c) return;
@@ -8205,10 +8227,12 @@ function libraryCardDelete(cardId) {
   let msg = `Delete "${title}"?`;
   if (c.bucket !== 'library') msg += `\n\n⚠️ This card is also in your drill rotation — its drill progress will be lost.`;
   if (!confirm(msg)) return;
-  concepts = concepts.filter(x => x.id !== cardId);
+  c.deleted = true;
+  c.deletedAt = new Date().toISOString();
+  c.lastModified = c.deletedAt;
   saveConcepts(concepts);
   showToast('Card deleted');
-  if (libraryEntrySource) openLibraryEntry(libraryEntrySource); // re-render (or land on empty state)
+  if (libraryEntrySource) openLibraryEntry(libraryEntrySource); // re-render
 }
 
 // Delete a Library entry — removes every card associated with the source.
@@ -8229,10 +8253,14 @@ function deleteLibraryEntry() {
   }
   if (!confirm(confirmMsg)) return;
 
-  const idsToRemove = new Set(matching.map(c => c.id));
-  const remaining = concepts.filter(c => !idsToRemove.has(c.id));
-  concepts.length = 0;
-  concepts.push(...remaining);
+  // Soft-delete each card so the merge sync carries tombstones across devices
+  // instead of resurrecting them from another device's stale local copy.
+  const now = new Date().toISOString();
+  for (const c of matching) {
+    c.deleted = true;
+    c.deletedAt = now;
+    c.lastModified = now;
+  }
   saveConcepts(concepts);
   showToast(`Deleted "${source}" (${matching.length} card${matching.length === 1 ? '' : 's'})`);
   libraryEntrySource = null;
@@ -9132,14 +9160,19 @@ function renderKnowledgeChatAnswer(answer, citations) {
     const key = (c.title || '').toLowerCase().trim();
     if (key && !byTitle.has(key)) byTitle.set(key, c);
   }
-  // Replace [Foo] with a clickable chip if Foo matches a citation title
-  const chipified = answer.replace(/\[([^\]]+)\]/g, (full, label) => {
+  // Step 1: render markdown via renderPoint (escapes HTML, processes bold/italic/etc).
+  // The [Title] brackets are plain text — they survive the escape unchanged.
+  const rendered = renderPoint(answer);
+  // Step 2: NOW substitute [Title] → <button> directly into the rendered HTML.
+  // Doing this AFTER renderPoint avoids the previous bug where the button HTML
+  // was being escaped into literal text by renderPoint's escapeHtml step.
+  return rendered.replace(/\[([^\]]+)\]/g, (full, label) => {
     const key = (label || '').toLowerCase().trim();
     const c = byTitle.get(key);
     if (!c) return full;
-    return `<button onclick="kcOpenCitation('${c.type}', ${JSON.stringify(c.sourceId).replace(/"/g, '&quot;')})" style="display:inline-block; padding:1px 8px; margin:0 2px; border:1px solid var(--concept); background:rgba(139,92,246,0.1); color:var(--concept); border-radius:8px; font-size:0.82rem; font-weight:600; cursor:pointer;">${escapeHtml(label)}</button>`;
+    const sidAttr = String(c.sourceId).replace(/'/g, "\\'");
+    return `<button onclick="kcOpenCitation('${c.type}', '${sidAttr}')" style="display:inline-block; padding:1px 8px; margin:0 2px; border:1px solid var(--concept); background:rgba(139,92,246,0.1); color:var(--concept); border-radius:8px; font-size:0.82rem; font-weight:600; cursor:pointer;">${escapeHtml(label)}</button>`;
   });
-  return renderPoint(chipified);
 }
 
 function kcOpenCitation(type, sourceId) {
@@ -11091,7 +11124,8 @@ function renderConceptBrowse() {
 
   // Compute the bucket-filtered list (used both for tag pills + final filter).
   // Library cards live ONLY in the Library view — exclude them from default Browse.
-  let bucketFiltered = concepts.filter(c => c.bucket !== 'library');
+  // Soft-deleted cards excluded too.
+  let bucketFiltered = concepts.filter(c => !c.deleted && c.bucket !== 'library');
   if (conceptActiveBucket) {
     if (conceptActiveBucket === 'new') bucketFiltered = bucketFiltered.filter(c => !c.bucket);
     else bucketFiltered = bucketFiltered.filter(c => c.bucket === conceptActiveBucket);
@@ -11787,10 +11821,10 @@ async function refreshConceptFromView() {
 // ─── Concept Recall Drill ───────────────────────────────────────────────
 
 function getConceptsByBucket(bucket) {
-  // Library cards are excluded from every drill bucket.
-  const isDrillable = c => (c.bucket || '') !== 'skip' && (c.bucket || '') !== 'library';
+  // Library cards are excluded from every drill bucket. Soft-deleted cards too.
+  const isDrillable = c => !c.deleted && (c.bucket || '') !== 'skip' && (c.bucket || '') !== 'library';
   if (bucket === 'all') return concepts.filter(isDrillable);
-  if (bucket === 'new') return concepts.filter(c => !c.bucket); // 'new' = no bucket, library cards already excluded
+  if (bucket === 'new') return concepts.filter(c => !c.deleted && !c.bucket);
   if (bucket === 'recent' || bucket === 'recent5') {
     const days = bucket === 'recent5' ? 5 : 15;
     const cutoff = new Date();
@@ -11801,7 +11835,7 @@ function getConceptsByBucket(bucket) {
       return added >= cutoffStr && isDrillable(c);
     });
   }
-  return concepts.filter(c => c.bucket === bucket);
+  return concepts.filter(c => !c.deleted && c.bucket === bucket);
 }
 
 function renderConceptDrillTagPills() {

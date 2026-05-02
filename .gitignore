@@ -9,3 +9,7 @@ idiom-quiz.db
 idiom-quiz.db-shm
 idiom-quiz.db-wal
 .claude/
+
+# Never commit data exports — they contain personal dossier/concept data
+lexicon-export-*.json
+*.db

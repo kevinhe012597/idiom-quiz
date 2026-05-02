@@ -835,7 +835,7 @@ function collectAllRetrievalUnits() {
     const cRow = selectAppStateStmt.get('concepts');
     const concepts = cRow && cRow.value ? JSON.parse(cRow.value) : [];
     for (const c of (Array.isArray(concepts) ? concepts : [])) {
-      if (!c || !c.id) continue;
+      if (!c || !c.id || c.deleted) continue;
       const content = buildConceptContent(c);
       if (!content || content.trim().length < 3) continue;
       units.push({
@@ -851,7 +851,7 @@ function collectAllRetrievalUnits() {
     const dRow = selectAppStateStmt.get('dossier_entities');
     const ents = dRow && dRow.value ? JSON.parse(dRow.value) : [];
     for (const e of (Array.isArray(ents) ? ents : [])) {
-      if (!e || !e.id) continue;
+      if (!e || !e.id || e.deleted) continue;
       const profileContent = buildDossierEntityContent(e);
       if (profileContent && profileContent.trim().length >= 3) {
         units.push({
