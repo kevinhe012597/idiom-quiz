@@ -2038,10 +2038,9 @@ textarea { resize: vertical; min-height: 80px; }
     <div class="fill-blank-section" id="fill-blank-section">
       <div class="blank-sentence" id="blank-sentence">Loading...</div>
       <div class="blank-meaning-hint" id="blank-meaning-hint"></div>
-      <input type="text" id="blank-answer" placeholder="Fill in the blank..." autocomplete="off">
       <div class="blank-actions">
         <button class="btn-hint" id="btn-hint" onclick="getBlankHint()">&#128161; Hint</button>
-        <button class="submit-answer-btn" id="submit-blank-btn" onclick="submitBlankAnswer()">Check Answer</button>
+        <button class="submit-answer-btn" id="submit-blank-btn" onclick="submitBlankAnswer()">Reveal Answer</button>
       </div>
       <div class="hint-display" id="hint-display"></div>
     </div>
@@ -4476,7 +4475,7 @@ function showCurrentCard() {
   document.getElementById('fill-blank-section').classList.remove('visible');
   document.getElementById('llm-feedback').className = 'llm-feedback';
   document.getElementById('typed-answer').value = '';
-  document.getElementById('blank-answer').value = '';
+  const _blankAns = document.getElementById('blank-answer'); if (_blankAns) _blankAns.value = '';
   document.getElementById('hint-display').classList.remove('visible');
   document.getElementById('hint-display').textContent = '';
   document.getElementById('btn-hint').disabled = false;
@@ -4681,7 +4680,7 @@ async function showFillBlank() {
   document.getElementById('flashcard').style.display = 'none';
   document.getElementById('review-card-actions').style.display = 'none';
   document.getElementById('fill-blank-section').classList.add('visible');
-  document.getElementById('blank-answer').value = '';
+  const _blankAns = document.getElementById('blank-answer'); if (_blankAns) _blankAns.value = '';
   document.getElementById('hint-display').classList.remove('visible');
   document.getElementById('hint-display').textContent = '';
   document.getElementById('btn-hint').disabled = false;
@@ -4690,13 +4689,13 @@ async function showFillBlank() {
   const card = reviewQueue[reviewIndex];
   const sentenceEl = document.getElementById('blank-sentence');
   const hintEl = document.getElementById('blank-meaning-hint');
-  const inputEl = document.getElementById('blank-answer');
+  const inputEl = document.getElementById('blank-answer'); // may be null (input was removed)
   const submitBtn = document.getElementById('submit-blank-btn');
 
   sentenceEl.textContent = 'Generating sentence...';
   sentenceEl.style.opacity = '0.5';
   hintEl.textContent = '';
-  inputEl.disabled = true;
+  if (inputEl) inputEl.disabled = true;
   submitBtn.disabled = true;
 
   try {
@@ -4721,9 +4720,8 @@ async function showFillBlank() {
     sentenceEl.innerHTML = safeSentence.replace(/_____/g, '<span class="blank-slot">_____</span>')
       + `<div class="blank-word-count">${wordCount} word${wordCount !== 1 ? 's' : ''}</div>`;
     hintEl.innerHTML = `<span class="blank-hint-label">Meaning clue</span>${safeHint}`;
-    inputEl.disabled = false;
+    if (inputEl) inputEl.disabled = false;
     submitBtn.disabled = false;
-    inputEl.focus();
   } catch (err) {
     blankCache.delete(card.id);
     sentenceEl.textContent = 'Failed to generate sentence. Try again.';
@@ -4770,98 +4768,36 @@ function showFilledSentence() {
   el.style.display = 'block';
 }
 
-async function submitBlankAnswer() {
-  const userAnswer = document.getElementById('blank-answer').value.trim();
+// Reveal-only flow: user mentally answers, taps Reveal, sees the answer +
+// full card, then self-rates Nope/Kinda/Nailed. No typing, no LLM check.
+function submitBlankAnswer() {
   if (!currentBlankData) return;
-
-  // If blank, user gave up — reveal the answer directly
-  if (!userAnswer) {
-    const card = reviewQueue[reviewIndex];
-    const fb = document.getElementById('llm-feedback');
-    fb.className = 'llm-feedback visible incorrect';
-    document.getElementById('feedback-label').textContent = 'The answer was:';
-    document.getElementById('feedback-your-answer').textContent = currentBlankData.answer;
-    document.getElementById('feedback-verdict').textContent = '';
-    document.getElementById('feedback-explanation').textContent = '';
-
-    document.getElementById('fill-blank-section').classList.remove('visible');
-    document.getElementById('flashcard').style.display = '';
-    document.getElementById('review-card-actions').style.display = '';
-    document.getElementById('card-phrase').style.display = '';
-    document.getElementById('card-category').style.display = '';
-    answerRevealed = true;
-    document.getElementById('review').classList.add('answer-revealed');
-    showFilledSentence();
-    document.getElementById('card-meaning').style.display = 'block';
-    document.getElementById('card-example').style.display = 'block';
-    document.getElementById('card-divider').style.display = 'block';
-    document.getElementById('btn-regen-example').style.display = 'inline-block';
-    document.getElementById('answer-section').classList.add('visible');
-    if (card.source) document.getElementById('card-source').style.display = 'block';
-    if (!card.example) fetchExample(card);
-    setTimeout(() => fb.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
-    return;
-  }
-
   const card = reviewQueue[reviewIndex];
-  const btn = document.getElementById('submit-blank-btn');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="loading-spinner"></span>Checking...';
 
-  try {
-    const response = await apiFetch('/api/evaluate-blank', {
-        phrase: card.phrase,
-        meaning: card.meaning,
-        sentence: currentBlankData.sentence,
-        expectedAnswer: currentBlankData.answer,
-        userAnswer
-      });
+  // Surface the correct answer in the feedback panel as a simple "the answer is..."
+  const fb = document.getElementById('llm-feedback');
+  fb.className = 'llm-feedback visible';
+  document.getElementById('feedback-label').textContent = 'Answer:';
+  document.getElementById('feedback-your-answer').textContent = currentBlankData.answer;
+  document.getElementById('feedback-verdict').textContent = '';
+  document.getElementById('feedback-explanation').textContent = '';
 
-    if (!response.ok) throw new Error('Evaluation failed');
-
-    const result = await response.json();
-
-    // Show feedback using the shared LLM feedback panel
-    const fb = document.getElementById('llm-feedback');
-    fb.className = 'llm-feedback visible ' + result.verdict;
-    document.getElementById('feedback-label').textContent = 'Your answer:';
-    document.getElementById('feedback-your-answer').textContent = userAnswer;
-    document.getElementById('feedback-verdict').textContent =
-      result.verdict === 'correct' ? 'Correct!' :
-      result.verdict === 'partial' ? 'Close!' : 'Not quite';
-    const correctLine = result.verdict !== 'correct'
-      ? `\nCorrect answer: ${currentBlankData.answer}\n\n${result.explanation}`
-      : result.explanation;
-    document.getElementById('feedback-explanation').textContent = correctLine;
-    setTimeout(() => fb.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
-
-    // Hide fill-blank section, reveal the card
-    document.getElementById('fill-blank-section').classList.remove('visible');
-    document.getElementById('flashcard').style.display = '';
-    document.getElementById('review-card-actions').style.display = '';
-    document.getElementById('card-phrase').style.display = '';
-    document.getElementById('card-category').style.display = '';
-    answerRevealed = true;
-    document.getElementById('review').classList.add('answer-revealed');
-    showFilledSentence();
-    document.getElementById('card-meaning').style.display = 'block';
-    document.getElementById('card-example').style.display = 'block';
-    document.getElementById('card-divider').style.display = 'block';
-    document.getElementById('btn-regen-example').style.display = 'inline-block';
-    document.getElementById('answer-section').classList.add('visible');
-    if (card.source) document.getElementById('card-source').style.display = 'block';
-
-    // Generate example on-the-fly if missing
-    if (!card.example) {
-      fetchExample(card);
-    }
-
-  } catch (err) {
-    showToast('Error: ' + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Check Answer';
-  }
+  document.getElementById('fill-blank-section').classList.remove('visible');
+  document.getElementById('flashcard').style.display = '';
+  document.getElementById('review-card-actions').style.display = '';
+  document.getElementById('card-phrase').style.display = '';
+  document.getElementById('card-category').style.display = '';
+  answerRevealed = true;
+  document.getElementById('review').classList.add('answer-revealed');
+  showFilledSentence();
+  document.getElementById('card-meaning').style.display = 'block';
+  document.getElementById('card-example').style.display = 'block';
+  document.getElementById('card-divider').style.display = 'block';
+  document.getElementById('btn-regen-example').style.display = 'inline-block';
+  document.getElementById('answer-section').classList.add('visible');
+  if (card.source) document.getElementById('card-source').style.display = 'block';
+  if (!card.example) fetchExample(card);
+  setTimeout(() => fb.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
 }
 
 async function getBlankHint() {
@@ -7849,13 +7785,17 @@ function backfillLegacyCardFields() {
   }
 })();
 
-// ─── Mobile keyboard: keep sentence visible when input focused ───────────
-document.getElementById('blank-answer').addEventListener('focus', () => {
-  setTimeout(() => {
-    const sentence = document.getElementById('blank-sentence');
-    if (sentence) sentence.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, 350); // wait for keyboard to finish opening
-});
+// ─── Mobile keyboard: keep sentence visible when input focused (no-op now
+// that the input was removed in favor of mental answer + Reveal flow). ─────
+const _blankAnsListenerEl = document.getElementById('blank-answer');
+if (_blankAnsListenerEl) {
+  _blankAnsListenerEl.addEventListener('focus', () => {
+    setTimeout(() => {
+      const sentence = document.getElementById('blank-sentence');
+      if (sentence) sentence.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 350);
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ─── CONCEPTS MODULE ────────────────────────────────────────────────────
