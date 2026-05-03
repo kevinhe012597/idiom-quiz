@@ -190,6 +190,19 @@ const OPENAI_MODELS = new Set([
 ]);
 
 const ALLOWED_MODELS = new Set([...OPENAI_MODELS, ...FIREWORKS_MODELS, ...ANTHROPIC_MODELS]);
+
+// ─── Upstream error logger (use in every API failure path) ────────────────
+// Standardizes the way we log failures from OpenAI/Anthropic/Fireworks/Gemini.
+// Format: [<endpoint>] model=<m> <label> <details...>
+// Example: logUpstreamError('polish', 'claude-sonnet-4-6', 'parse-error', err.message, body.slice(0,400))
+function logUpstreamError(endpoint, model, label, ...details) {
+  const safeDetails = details.map(d => {
+    if (d == null) return '';
+    if (typeof d === 'string') return d.length > 500 ? d.slice(0, 500) + '…' : d;
+    try { return JSON.stringify(d).slice(0, 500); } catch { return String(d); }
+  });
+  console.error(`[${endpoint}] model=${model || '?'} ${label}`, ...safeDetails);
+}
 // Note: my gpt-5.5-* slug guesses (nano/mini/pro) returned 404 from OpenAI.
 // Until we confirm the actual GPT-5.5 model IDs, default stays on gpt-5.4-mini
 // which is verified working. The 5.5 entries above remain allowlisted so when
@@ -990,6 +1003,32 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // ─── Universal request logger ───────────────────────────────────────────
+  // Wraps res.writeHead + res.end to capture status code and duration so
+  // every endpoint emits a single line on completion. Filters skip noisy
+  // GET-200 polls but always log mutations + any error. This means future
+  // bugs get visible in railway logs without needing per-endpoint changes.
+  const _reqStart = Date.now();
+  const _reqLabel = `[${req.method} ${(req.url || '').split('?')[0]}]`;
+  const _origWriteHead = res.writeHead.bind(res);
+  let _statusCode = 200;
+  res.writeHead = function(code, ...rest) {
+    _statusCode = code;
+    return _origWriteHead(code, ...rest);
+  };
+  const _origEnd = res.end.bind(res);
+  res.end = function(...args) {
+    const duration = Date.now() - _reqStart;
+    const isApi = (req.url || '').startsWith('/api/');
+    const isMutation = req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE';
+    const isError = _statusCode >= 400;
+    if (isApi && (isMutation || isError)) {
+      const tag = isError ? 'ERR' : 'ok ';
+      console.log(`${tag} ${_reqLabel} ${_statusCode} ${duration}ms`);
+    }
+    return _origEnd(...args);
+  };
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
