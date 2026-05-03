@@ -2942,6 +2942,30 @@ textarea { resize: vertical; min-height: 80px; }
     <button onclick="deleteLibraryEntry()" title="Delete this summary" style="background:none; border:none; color:var(--red); font-size:0.9rem; font-weight:600; cursor:pointer; padding:6px 10px;">🗑 Delete</button>
   </div>
   <div id="library-entry-meta" style="font-size:0.78rem; color:var(--text-dim); margin-bottom:14px;"></div>
+
+  <!-- Chat with this summary — collapsible -->
+  <div id="library-entry-chat-section" style="margin-bottom:14px; padding:12px 14px; background:var(--surface1); border-radius:12px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <span style="font-size:0.78rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">💬 Chat with this summary</span>
+      <button onclick="libraryChatToggle()" id="library-chat-toggle" style="background:none; border:none; color:var(--concept); font-size:0.78rem; cursor:pointer; font-weight:600;">+ Open</button>
+    </div>
+    <div id="library-chat-body" style="display:none; margin-top:10px;">
+      <div id="library-chat-messages" style="display:flex; flex-direction:column; gap:8px; min-height:80px; max-height:380px; overflow-y:auto; padding:10px; background:var(--surface); border-radius:10px; margin-bottom:8px;">
+        <div id="library-chat-empty" style="color:var(--text-dim); font-size:0.85rem; line-height:1.55; text-align:center; padding:14px 8px;">
+          Ask anything about this summary.<br>
+          <span style="font-size:0.75rem;">Try: <em>"What's the strongest argument here?"</em> or <em>"How does this connect to the founding team's background?"</em></span>
+        </div>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <textarea id="library-chat-input" rows="2" placeholder="Ask anything about this summary..." onkeydown="if(event.key==='Enter' && !event.shiftKey && !event.metaKey){event.preventDefault(); libraryChatSend();}" style="flex:1; padding:8px 12px; font-size:0.88rem; border:1px solid var(--surface2); border-radius:10px; background:var(--surface); color:var(--text); font-family:inherit; resize:vertical; box-sizing:border-box;"></textarea>
+        <button onclick="libraryChatSend()" id="library-chat-send-btn" class="btn-primary concept-btn" style="width:auto; padding:8px 18px;">Send</button>
+      </div>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:6px;">
+        <button onclick="libraryChatReset()" style="background:none; border:none; color:var(--text-dim); font-size:0.72rem; cursor:pointer;">↻ New chat</button>
+      </div>
+    </div>
+  </div>
+
   <div id="library-entry-list"></div>
 </div>
 
@@ -8192,12 +8216,141 @@ function openLibraryEntry(source) {
       </div>`;
     }).join('');
   }
+  // Reset the chat panel to collapsed state — user opens it explicitly.
+  // Keeps per-source history isolated.
+  const chatBody = document.getElementById('library-chat-body');
+  const chatToggle = document.getElementById('library-chat-toggle');
+  if (chatBody) chatBody.style.display = 'none';
+  if (chatToggle) chatToggle.textContent = '+ Open';
+
   showScreen('library-entry');
 }
 
 // Promote a single card from a Library entry into the drill rotation.
 // The card stays in Library (inLibrary remains true) — bucket flips from
 // 'library' to undefined so drill picks it up.
+// ─── Library entry chat ──────────────────────────────────────────────────
+// Per-source chat: Sonnet sees ONLY the cards in this Library entry.
+// History persists in localStorage keyed by source so each summary keeps its
+// own conversation thread.
+
+const LIBRARY_CHAT_HISTORY_KEY = 'lexicon-library-chat-history';
+
+function _libChatHistoryAll() {
+  try { return JSON.parse(localStorage.getItem(LIBRARY_CHAT_HISTORY_KEY)) || {}; }
+  catch { return {}; }
+}
+function _libChatHistorySave(all) {
+  try { localStorage.setItem(LIBRARY_CHAT_HISTORY_KEY, JSON.stringify(all)); } catch {}
+}
+function libChatHistoryFor(source) {
+  const all = _libChatHistoryAll();
+  return Array.isArray(all[source]) ? all[source] : [];
+}
+function libChatHistorySet(source, history) {
+  const all = _libChatHistoryAll();
+  all[source] = history;
+  _libChatHistorySave(all);
+}
+
+function libraryChatToggle() {
+  const body = document.getElementById('library-chat-body');
+  const toggle = document.getElementById('library-chat-toggle');
+  if (!body || !toggle) return;
+  const isOpen = body.style.display !== 'none';
+  if (isOpen) {
+    body.style.display = 'none';
+    toggle.textContent = '+ Open';
+  } else {
+    body.style.display = 'block';
+    toggle.textContent = '− Close';
+    libraryChatRender(); // populate from saved history for this source
+  }
+}
+
+function libraryChatReset() {
+  const source = libraryEntrySource;
+  if (!source) return;
+  const hist = libChatHistoryFor(source);
+  if (hist.length === 0) return;
+  if (!confirm('Clear this conversation?')) return;
+  libChatHistorySet(source, []);
+  libraryChatRender();
+}
+
+function libraryChatRender() {
+  const source = libraryEntrySource;
+  if (!source) return;
+  const messagesEl = document.getElementById('library-chat-messages');
+  if (!messagesEl) return;
+  const history = libChatHistoryFor(source);
+  if (history.length === 0) {
+    messagesEl.innerHTML = `<div id="library-chat-empty" style="color:var(--text-dim); font-size:0.85rem; line-height:1.55; text-align:center; padding:14px 8px;">
+      Ask anything about this summary.<br>
+      <span style="font-size:0.75rem;">Try: <em>"What's the strongest argument here?"</em> or <em>"How does this connect to the founding team's background?"</em></span>
+    </div>`;
+    return;
+  }
+  messagesEl.innerHTML = history.map(msg => {
+    if (msg.role === 'user') {
+      return `<div style="align-self:flex-end; max-width:88%; padding:8px 12px; background:var(--accent); color:#fff; border-radius:14px 14px 2px 14px; font-size:0.9rem; line-height:1.5;">${escapeHtml(msg.content)}</div>`;
+    }
+    if (msg.error) {
+      return `<div style="align-self:flex-start; max-width:90%; padding:8px 12px; color:var(--red); font-size:0.85rem;">Error: ${escapeHtml(msg.error)}</div>`;
+    }
+    // Use the same citation-chipify pattern as knowledge-chat
+    const html = renderKnowledgeChatAnswer(msg.content || '', msg.citations || []);
+    return `<div style="align-self:flex-start; max-width:92%; padding:10px 14px; background:var(--surface1); border:1px solid var(--surface2); border-radius:14px 14px 14px 2px; font-size:0.9rem; line-height:1.6;">${html}</div>`;
+  }).join('');
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+async function libraryChatSend() {
+  const source = libraryEntrySource;
+  if (!source) return;
+  const input = document.getElementById('library-chat-input');
+  const sendBtn = document.getElementById('library-chat-send-btn');
+  const question = (input.value || '').trim();
+  if (!question) { showToast('Type a question first'); return; }
+
+  const history = libChatHistoryFor(source);
+  history.push({ role: 'user', content: question });
+  const placeholderIdx = history.length;
+  history.push({ role: 'assistant', content: 'Thinking…', loading: true });
+  libChatHistorySet(source, history);
+  input.value = '';
+  libraryChatRender();
+  sendBtn.disabled = true;
+
+  try {
+    // Send only the trimmed history (drop the loading placeholder)
+    const sentHistory = history.slice(0, placeholderIdx - 1).map(m => ({
+      role: m.role, content: m.content,
+    }));
+    const resp = await apiFetch('/api/library-chat', {
+      source,
+      question,
+      history: sentHistory,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    history[placeholderIdx] = {
+      role: 'assistant',
+      content: data.answer || '',
+      citations: data.citations || [],
+    };
+  } catch (err) {
+    history[placeholderIdx] = { role: 'assistant', content: '', error: err.message || 'Unknown error' };
+  } finally {
+    sendBtn.disabled = false;
+    libChatHistorySet(source, history);
+    libraryChatRender();
+  }
+}
+
 function libraryCardSendToDrill(cardId) {
   const c = concepts.find(x => x.id === cardId);
   if (!c) return;

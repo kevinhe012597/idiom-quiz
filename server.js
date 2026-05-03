@@ -1171,6 +1171,125 @@ const server = http.createServer(async (req, res) => {
   // ─── Knowledge chat (RAG) ────────────────────────────────────────────────
   // Ask a question; the server retrieves top-k matching units from the user's
   // own concepts/library/dossier and answers using ONLY that context.
+  // ─── Library-source chat ────────────────────────────────────────────────
+  // Scoped chat over the cards from a single Library entry. No RAG —
+  // entries are small (5-15 cards typically) so we just stuff them all
+  // into Sonnet's context. Always reflects the latest content (doesn't
+  // depend on embeddings being indexed).
+  if (req.method === 'POST' && req.url === '/api/library-chat') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body || '{}');
+        const { source, question, history } = _body;
+        if (!source || typeof source !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing source' }));
+          return;
+        }
+        if (!question || typeof question !== 'string' || question.trim().length < 2) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing question' }));
+          return;
+        }
+        // Load cards for this Library source from app_state
+        const cRow = selectAppStateStmt.get('concepts');
+        const concepts = cRow && cRow.value ? JSON.parse(cRow.value) : [];
+        const sourceTrim = source.trim();
+        const cards = (concepts || []).filter(c =>
+          !c.deleted && c.inLibrary && (c.source || '').trim() === sourceTrim
+        );
+        if (cards.length === 0) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            answer: "This Library entry has no cards yet — nothing to chat about.",
+            citations: [],
+          }));
+          return;
+        }
+
+        // Build context block + citation list
+        const citations = [];
+        const ctxBlocks = cards.map(c => {
+          const points = (c.points || []).map(p => p.replace(/^[•\-–—]\s*/, '').trim()).filter(Boolean);
+          const tagsLine = (c.tags || []).length ? `Tags: ${c.tags.join(', ')}` : '';
+          citations.push({ type: 'concept', sourceId: c.id, title: c.title || 'Untitled' });
+          return `[${c.title || 'Untitled'}]
+${tagsLine ? tagsLine + '\n' : ''}${points.map(p => '• ' + p).join('\n')}`;
+        }).join('\n\n---\n\n');
+
+        const usedModel = pickAnthropicModel(_body);
+        const sys = `You are answering questions about a single saved Library entry — a collection of concept cards the user extracted from one talk, article, or video. Answer using ONLY the cards below.
+
+Source: "${sourceTrim}"
+
+Rules:
+- Stay strictly within the cards. Do not introduce facts that aren't there.
+- Cite specific cards inline using [Title] markers (e.g. [LLMs as Operating Systems]).
+- If the answer is genuinely not in these cards, say so honestly.
+- Keep answers tight (3-6 sentences typically) unless the question genuinely needs depth.
+- Voice: a knowledgeable friend who has read this whole talk/article and can riff on it.
+
+CARDS IN THIS ENTRY:
+
+${ctxBlocks}`;
+
+        const messages = Array.isArray(history) ? history.slice(-8) : [];
+        messages.push({ role: 'user', content: question.trim() });
+
+        const anthropicPayload = JSON.stringify({
+          model: usedModel,
+          system: sys,
+          messages,
+          max_tokens: 1500,
+        });
+
+        const httpsLib = require('https');
+        const apiReq = httpsLib.request({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(anthropicPayload),
+          },
+        }, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('library-chat Anthropic error:', apiRes.statusCode, data.slice(0, 300));
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `Chat failed (HTTP ${apiRes.statusCode})` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const answer = (parsed.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n').trim();
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ answer, citations, model: usedModel }));
+            } catch (e) {
+              console.error('library-chat parse error:', e.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(anthropicPayload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/knowledge-chat') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
