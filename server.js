@@ -3795,6 +3795,30 @@ Return ONLY valid JSON array with this exact shape: [{"phrase":"...","category":
     throw new Error('Could not locate a JSON array in the response');
   }
 
+  // Same idea for endpoints that expect a top-level JSON OBJECT (not array).
+  // Handles markdown fences + prose preamble/trailer (e.g. Sonnet wrapping
+  // its JSON in "Here's the input: ... ```json {...} ```" boilerplate).
+  function extractJsonObject(content) {
+    if (!content) throw new Error('Empty content');
+    let s = content.trim();
+    s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
+    // First attempt: parse as-is
+    try {
+      const parsed = JSON.parse(s);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch (_) { /* fall through */ }
+    // Second attempt: slice from first '{' to last '}' (handles prose wrap)
+    const oa = s.indexOf('{');
+    const ob = s.lastIndexOf('}');
+    if (oa !== -1 && ob > oa) {
+      try {
+        const obj = JSON.parse(s.slice(oa, ob + 1));
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
+      } catch (_) { /* fall through */ }
+    }
+    throw new Error('Could not locate a JSON object in the response');
+  }
+
   if (req.method === 'POST' && req.url === '/api/reverse-lookup') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
@@ -4287,10 +4311,8 @@ Be concise but helpful. If the word is correct, acknowledge it and still offer a
           res.end(JSON.stringify({ error: 'Missing sentence' }));
           return;
         }
-        // Diagnostic logging — temporary, lets us see what OpenAI returns
-        // when /api/polish fails. Remove once root cause is identified.
+        // Logger kept (concise) so future polish failures still leave a trail.
         const _polishLog = (label, ...args) => console.error(`polish ${label} model=${pickModel(_body)}`, ...args);
-        _polishLog('start', `len=${sentence.length}`);
 
         const payload = JSON.stringify({
           model: pickModel(_body),
@@ -4336,9 +4358,10 @@ Return JSON:
             }
             try {
               const parsed = JSON.parse(data);
-              const content = parsed.choices[0].message.content.trim();
-              const jsonStr = content.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-              const result = JSON.parse(jsonStr);
+              const content = (parsed.choices?.[0]?.message?.content || '').trim();
+              // Tolerant extractor — handles bare JSON, fenced JSON, or
+              // JSON wrapped in prose preamble/trailer (which Sonnet does).
+              const result = extractJsonObject(content);
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify(result));
             } catch (e) {
