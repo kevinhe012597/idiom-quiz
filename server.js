@@ -4287,6 +4287,10 @@ Be concise but helpful. If the word is correct, acknowledge it and still offer a
           res.end(JSON.stringify({ error: 'Missing sentence' }));
           return;
         }
+        // Diagnostic logging — temporary, lets us see what OpenAI returns
+        // when /api/polish fails. Remove once root cause is identified.
+        const _polishLog = (label, ...args) => console.error(`polish ${label} model=${pickModel(_body)}`, ...args);
+        _polishLog('start', `len=${sentence.length}`);
 
         const payload = JSON.stringify({
           model: pickModel(_body),
@@ -4325,6 +4329,7 @@ Return JSON:
           apiRes.on('data', chunk => { data += chunk; });
           apiRes.on('end', () => {
             if (apiRes.statusCode !== 200) {
+              _polishLog('upstream-error', `status=${apiRes.statusCode} body=`, data.slice(0, 400));
               res.writeHead(500, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: `OpenAI API error: ${apiRes.statusCode}` }));
               return;
@@ -4337,6 +4342,7 @@ Return JSON:
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify(result));
             } catch (e) {
+              _polishLog('parse-error', `msg=${e.message} content=`, (data || '').slice(0, 400));
               res.writeHead(500, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: 'Failed to parse response' }));
             }
@@ -4344,6 +4350,7 @@ Return JSON:
         });
 
         apiReq.on('error', (err) => {
+          _polishLog('request-error', err.message);
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: err.message }));
         });
