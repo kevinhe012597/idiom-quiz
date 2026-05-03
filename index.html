@@ -2781,6 +2781,7 @@ textarea { resize: vertical; min-height: 80px; }
       <button id="concept-tab-article" onclick="switchConceptTab('article')" style="flex:1; padding:10px; border:none; background:none; font-size:0.85rem; font-weight:600; cursor:pointer; color:var(--concept); border-bottom:2px solid var(--concept); margin-bottom:-2px;">Import from Article</button>
       <button id="concept-tab-youtube" onclick="switchConceptTab('youtube')" style="flex:1; padding:10px; border:none; background:none; font-size:0.85rem; font-weight:600; cursor:pointer; color:var(--text-dim); border-bottom:2px solid transparent; margin-bottom:-2px;">YouTube</button>
       <button id="concept-tab-thought" onclick="switchConceptTab('thought')" style="flex:1; padding:10px; border:none; background:none; font-size:0.85rem; font-weight:600; cursor:pointer; color:var(--text-dim); border-bottom:2px solid transparent; margin-bottom:-2px;">Scattered Thoughts</button>
+      <button id="concept-tab-manual" onclick="switchConceptTab('manual')" style="flex:1; padding:10px; border:none; background:none; font-size:0.85rem; font-weight:600; cursor:pointer; color:var(--text-dim); border-bottom:2px solid transparent; margin-bottom:-2px;">Manual</button>
     </div>
 
     <!-- Article import panel -->
@@ -10210,9 +10211,9 @@ function conceptQuickReset() {
 
 function switchConceptTab(tab) {
   const tabs = { article: 'concept-panel-article', youtube: 'concept-panel-youtube', thought: 'concept-panel-thought' };
-  const tabBtns = { article: 'concept-tab-article', youtube: 'concept-tab-youtube', thought: 'concept-tab-thought' };
+  const tabBtns = { article: 'concept-tab-article', youtube: 'concept-tab-youtube', thought: 'concept-tab-thought', manual: 'concept-tab-manual' };
 
-  // Hide all panels
+  // Hide all quick-add panels
   Object.values(tabs).forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
@@ -10223,6 +10224,33 @@ function switchConceptTab(tab) {
     if (el) { el.style.color = 'var(--text-dim)'; el.style.borderBottomColor = 'transparent'; }
   });
 
+  const quickAddSection = document.getElementById('concept-quick-add-section');
+  const manualSection = document.getElementById('concept-manual-section');
+
+  if (tab === 'manual') {
+    // Manual tab: hide the whole quick-add section (which holds the
+    // article/youtube/thought panels) and show the existing concept-edit
+    // form set up for a NEW card. Reuses the form already used for editing.
+    if (quickAddSection) quickAddSection.style.display = 'none';
+    if (manualSection) manualSection.style.display = 'block';
+    conceptEditId = null;
+    document.getElementById('concept-edit-title').value = '';
+    document.getElementById('concept-edit-points').value = '';
+    document.getElementById('concept-edit-notes').value = '';
+    document.getElementById('concept-edit-source').value = 'other';
+    const valEl = document.getElementById('concept-edit-value-placeholder');
+    if (valEl) valEl.innerHTML = valueSelectorHtml('concept-edit-value', '');
+    mountConceptEditTagEditor([]);
+    document.getElementById('concept-delete-btn').style.display = 'none';
+    const btn = document.getElementById(tabBtns.manual);
+    if (btn) { btn.style.color = 'var(--concept)'; btn.style.borderBottomColor = 'var(--concept)'; }
+    setTimeout(() => document.getElementById('concept-edit-title')?.focus(), 50);
+    return;
+  }
+
+  // Quick-add tabs: ensure quick-add section visible, manual hidden
+  if (quickAddSection) quickAddSection.style.display = 'block';
+  if (manualSection) manualSection.style.display = 'none';
   // Show selected panel (default to article if unknown)
   const safeTab = tabs[tab] ? tab : 'article';
   const panel = document.getElementById(tabs[safeTab]);
