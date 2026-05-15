@@ -49,6 +49,14 @@ body {
   padding: 20px;
 }
 
+/* Capacitor iOS shell positions the webview inside the safe area, so
+   env(safe-area-inset-top) returns 0. Manually reserve room for the
+   Dynamic Island / status bar (~50pt top) and home indicator (~24pt bottom). */
+body.is-capacitor-ios .container {
+  padding-top: 50px;
+  padding-bottom: 30px;
+}
+
 h1 { font-size: 1.8rem; font-weight: 700; }
 h2 { font-size: 1.3rem; font-weight: 600; margin-bottom: 16px; }
 
@@ -148,7 +156,6 @@ textarea { resize: vertical; min-height: 80px; }
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-.stat-card.due .number { color: var(--accent); }
 .stat-card.total .number { color: var(--blue); }
 .stat-card.mastered .number { color: var(--green); }
 
@@ -834,8 +841,6 @@ textarea { resize: vertical; min-height: 80px; }
   border-radius: 12px;
   white-space: nowrap;
 }
-.status-due { background: rgba(59, 130, 246, 0.14); color: var(--blue); }
-.status-learning { background: rgba(245, 158, 11, 0.16); color: #b45309; }
 .status-mastered { background: rgba(22, 163, 74, 0.14); color: var(--green); }
 
 .empty-state {
@@ -893,6 +898,63 @@ textarea { resize: vertical; min-height: 80px; }
   border-radius: 14px;
   margin-bottom: 10px;
   overflow: hidden;
+}
+
+/* Look Up screen: side-by-side layout with the scratchpad on wider screens.
+   On phones it stacks (scratchpad below the lookup tools), and the dedicated
+   Scratchpad screen still works the same. Both textareas sync to one source. */
+.lookup-grid {
+  display: block;
+}
+.lookup-col-side {
+  display: none;
+}
+@media (min-width: 1000px) {
+  /* Break the Look Up screen out of the 640px vocab container so the
+     2-col layout (lookup tools + scratchpad) actually fills the screen
+     instead of cramping into the centered narrow column. */
+  #lookup {
+    width: calc(100vw - 80px);
+    max-width: 1280px;
+    margin-left: 50%;
+    transform: translateX(-50%);
+  }
+  .lookup-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 0.8fr);
+    gap: 24px;
+    align-items: start;
+  }
+  .lookup-col-side {
+    display: block;
+    position: sticky;
+    top: 16px;
+    background: var(--surface);
+    border: 1px solid var(--surface2);
+    border-radius: 14px;
+    padding: 14px;
+  }
+  .lookup-col-side h3 {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+    font-weight: 700;
+  }
+  .lookup-col-side textarea {
+    width: 100%;
+    min-height: 60vh;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid var(--surface2);
+    background: var(--surface1);
+    color: var(--text);
+    font-size: 0.92rem;
+    line-height: 1.55;
+    resize: vertical;
+    font-family: inherit;
+  }
 }
 .lookup-section-header {
   display: flex;
@@ -1687,6 +1749,9 @@ textarea { resize: vertical; min-height: 80px; }
 /* ─── Dossier module styles ─── */
 .module-card-dossier { background: linear-gradient(135deg, rgba(13,148,136,0.08), rgba(20,184,166,0.04)); border-color: rgba(13,148,136,0.25); }
 .module-card-dossier:hover { border-color: var(--dossier); }
+.module-card-questions { background: linear-gradient(135deg, rgba(245,158,11,0.08), rgba(245,158,11,0.04)); border-color: rgba(245,158,11,0.25); }
+.module-card-questions:hover { border-color: var(--orange); }
+.module-card-questions .module-card-title { color: var(--orange); }
 
 .dossier-section { margin-top: 14px; padding: 12px 14px; background: var(--surface1); border-radius: 12px; }
 .dossier-section-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -1902,6 +1967,15 @@ textarea { resize: vertical; min-height: 80px; }
         </div>
         <div class="module-card-arrow">›</div>
       </div>
+      <div class="module-card module-card-questions" onclick="enterQuestions()">
+        <div class="module-card-icon">❓</div>
+        <div class="module-card-info">
+          <div class="module-card-title">Questions</div>
+          <div class="module-card-sub">Capture questions by topic — never lose the thread</div>
+          <div class="module-card-count" id="module-questions-count"></div>
+        </div>
+        <div class="module-card-arrow">›</div>
+      </div>
     </div>
   </div>
 
@@ -1925,23 +1999,21 @@ textarea { resize: vertical; min-height: 80px; }
         <span class="number" id="nailed-count" style="color:var(--green)">0</span>
         <span class="label">Nailed it</span>
       </div>
-      <div class="stat-card bucket-card" onclick="showBucket('skip')" style="cursor:pointer">
-        <span class="number" id="skip-count" style="color:var(--text-dim)">0</span>
-        <span class="label">Not Useful</span>
-      </div>
       <div class="stat-card bucket-card" onclick="showBucket('new')" style="cursor:pointer">
         <span class="number" id="new-count" style="color:var(--blue)">0</span>
         <span class="label">New</span>
+      </div>
+      <div class="stat-card bucket-card" onclick="showBucket('all')" style="cursor:pointer">
+        <span class="number" id="all-count" style="color:var(--accent)">0</span>
+        <span class="label">All Cards</span>
       </div>
     </div>
     <div class="dashboard-bottom">
       <div class="dashboard-actions">
         <button class="btn-primary" onclick="showLookup()" style="background:var(--accent); font-size:1rem;">Look Up a Word</button>
-        <button class="btn-primary" id="start-fill-blank-btn" onclick="openFillBlankTargetDialog()">Fill in the Blank</button>
+        <button class="btn-primary" id="start-fill-blank-btn" onclick="openFillBlankTargetDialog()" style="background:var(--orange); color:#fff;">Fill in the Blank</button>
+        <button class="btn-primary" onclick="showAddForm()" style="background:var(--concept); color:#fff;">Add New Cards</button>
         <button class="btn-primary" id="start-daily-btn" onclick="startDailyMode()" style="background:var(--blue)">Daily Mode</button>
-        <button class="btn-primary" id="start-write-sentence-btn" onclick="startWriteSentence()" style="background:var(--accent2)">Write a Sentence</button>
-        <button class="btn-secondary" onclick="activeBucket=null;showScreen('browse')">Browse All Cards</button>
-        <button class="btn-secondary" onclick="showAddForm()">Add New Cards</button>
         <button class="btn-secondary" onclick="showScratchpad()" style="background:var(--surface1); border:1px dashed var(--text-dim);">📝 Scratchpad</button>
       </div>
       <div class="dashboard-sidebar">
@@ -2271,6 +2343,9 @@ textarea { resize: vertical; min-height: 80px; }
     <div></div>
   </div>
 
+<div class="lookup-grid">
+<div class="lookup-col-main">
+
   <!-- 1. Look up a specific word -->
   <div class="lookup-section" id="lookup-section-word">
     <div class="lookup-section-header" onclick="toggleLookupSection('word')">
@@ -2339,6 +2414,8 @@ textarea { resize: vertical; min-height: 80px; }
       <input type="text" id="complete-input" placeholder='e.g. He was completely ... about the meeting' autocomplete="off">
       <label style="font-size:0.8rem; color:var(--text-dim); margin:10px 0 4px; display:block;">Meaning</label>
       <input type="text" id="complete-meaning" placeholder="e.g. They are desperate and have nothing to lose" autocomplete="off">
+      <label style="font-size:0.8rem; color:var(--text-dim); margin:10px 0 4px; display:block;">Constraint <span style="font-weight:400; color:var(--text-dim);">(optional)</span></label>
+      <input type="text" id="complete-constraint" placeholder='e.g. "must start with p", "must be an idiom", "two words max"' autocomplete="off">
       <button class="btn-primary" id="complete-btn" onclick="doComplete()" style="width:100%; margin-top:10px;">Find the Word</button>
       <div id="complete-result" style="display:none;"></div>
     </div>
@@ -2509,6 +2586,14 @@ textarea { resize: vertical; min-height: 80px; }
       <div id="en2zh-result" style="display:none;"></div>
     </div>
   </div>
+
+</div><!-- /lookup-col-main -->
+<aside class="lookup-col-side">
+  <h3>📝 Scratchpad</h3>
+  <textarea id="lookup-scratchpad-input" placeholder="Jot ideas, paste sentences to look up later, take notes…" oninput="saveScratchpad(this.value)"></textarea>
+</aside>
+</div><!-- /lookup-grid -->
+
 </div>
 
 <!-- Verify a Phrase Screen -->
@@ -2549,7 +2634,7 @@ textarea { resize: vertical; min-height: 80px; }
     <div></div>
   </div>
   <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:12px;">Jot down questions, ideas, or things to look up later. Auto-saved.</p>
-  <textarea id="scratchpad-input" placeholder="e.g. What's the difference between 'comprise' and 'compose'?&#10;&#10;Look up: words for describing someone who talks too much&#10;&#10;Is 'irregardless' actually a word?" style="width:100%; min-height:calc(100vh - 220px); padding:14px; border-radius:12px; border:1px solid var(--surface2); background:var(--surface1); color:var(--text); font-size:0.95rem; line-height:1.6; resize:none; font-family:inherit;" oninput="saveScratchpad()"></textarea>
+  <textarea id="scratchpad-input" placeholder="e.g. What's the difference between 'comprise' and 'compose'?&#10;&#10;Look up: words for describing someone who talks too much&#10;&#10;Is 'irregardless' actually a word?" style="width:100%; min-height:calc(100vh - 220px); padding:14px; border-radius:12px; border:1px solid var(--surface2); background:var(--surface1); color:var(--text); font-size:0.95rem; line-height:1.6; resize:none; font-family:inherit;" oninput="saveScratchpad(this.value)"></textarea>
   <div style="display:flex; gap:8px; margin-top:10px;">
     <button class="btn-secondary" onclick="clearScratchpad()" style="flex:1; font-size:0.85rem;">Clear All</button>
   </div>
@@ -2564,7 +2649,7 @@ textarea { resize: vertical; min-height: 80px; }
     <h2 style="color:var(--concept);">💡 Concepts</h2>
     <div></div>
   </div>
-  <!-- Knowledge-base dashboard: total / this week / drill due, recent additions, top tags -->
+  <!-- Knowledge-base dashboard: total / this week / today, recent additions, top tags -->
   <div class="kb-stats">
     <div class="kb-stat-card" onclick="conceptBrowseByBucket(null)" style="cursor:pointer;">
       <div class="kb-stat-num" id="kb-total" style="color:var(--concept);">0</div>
@@ -3149,6 +3234,42 @@ textarea { resize: vertical; min-height: 80px; }
   <button id="dossier-edit-delete-btn" onclick="dossierDeleteEntity()" class="btn-secondary" style="margin-top:24px; width:100%; color:var(--red); border-color:rgba(239,68,68,0.4); display:none;">🗑 Delete this entity</button>
 </div>
 
+<!-- ─── QUESTIONS MODULE ─────────────────────────────────────────────── -->
+<!-- Lightweight notepad: topics → questions. No SRS, no AI. Just capture. -->
+<div id="questions-dashboard" class="screen">
+  <div class="header">
+    <button class="back" onclick="showScreen('module-select')">&larr;</button>
+    <h2 style="color:var(--orange);">❓ Questions</h2>
+    <div></div>
+  </div>
+  <p style="color:var(--text-dim); font-size:0.85rem; margin-bottom:14px;">Capture questions by topic — tap a topic to add or browse its questions.</p>
+  <div style="display:flex; gap:8px; margin-bottom:16px;">
+    <input type="text" id="new-topic-input" placeholder="New topic… (e.g. Building startups)" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();addQuestionTopic();}" style="flex:1;">
+    <button class="btn-primary" onclick="addQuestionTopic()" style="width:auto; padding:12px 18px; background:var(--orange);">+ Topic</button>
+  </div>
+  <div id="questions-topics-list"></div>
+</div>
+
+<div id="questions-topic-view" class="screen">
+  <div class="header">
+    <button class="back" onclick="showScreen('questions-dashboard')">&larr;</button>
+    <h2 style="color:var(--orange); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;" id="qt-topic-title">Topic</h2>
+    <button onclick="renameCurrentTopic()" style="background:none; border:none; color:var(--orange); font-size:0.85rem; font-weight:600; cursor:pointer;">Rename</button>
+  </div>
+  <div style="display:flex; gap:8px; margin-bottom:6px; align-items:flex-start;">
+    <textarea id="new-question-input" rows="2" placeholder="What's on your mind…" oninput="autoGrowChatTextarea(this)" onkeydown="if(event.key==='Enter' && !event.shiftKey && !event.metaKey){event.preventDefault();addQuestion();}" style="flex:1; resize:none;"></textarea>
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      <button class="btn-primary" onclick="addQuestion()" style="width:auto; padding:10px 16px; background:var(--orange);">Add</button>
+      <button class="btn-secondary" id="polish-question-btn" onclick="polishQuestionDraft()" style="width:auto; padding:8px 14px; font-size:0.82rem;" title="Refine the wording with AI before saving">✨ Polish</button>
+    </div>
+  </div>
+  <div id="polish-question-original" style="display:none; font-size:0.78rem; color:var(--text-dim); margin-bottom:14px; padding:8px 10px; background:var(--surface1); border-radius:8px;"></div>
+  <div id="qt-questions-list"></div>
+  <div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--surface2);">
+    <button class="btn-secondary" onclick="deleteCurrentTopic()" style="width:100%; font-size:0.85rem; color:var(--red);">🗑️ Delete this topic</button>
+  </div>
+</div>
+
 <!-- ─── KNOWLEDGE CHAT (RAG over concepts + library + dossier) ─────────── -->
 <div id="knowledge-chat" class="screen">
   <div class="header">
@@ -3320,6 +3441,7 @@ textarea { resize: vertical; min-height: 80px; }
   <div class="fill-target-card">
     <h3>Choose a Fill in the Blank list</h3>
     <div class="fill-target-grid">
+      <button class="fill-target-btn fill-target-recent" onclick="startFillBlank('recent1')">Recent (1 day)</button>
       <button class="fill-target-btn fill-target-recent" onclick="startFillBlank('recent5')">Recent (5 days)</button>
       <button class="fill-target-btn fill-target-recent" onclick="startFillBlank('recent')">Recent (15 days)</button>
       <button class="fill-target-btn fill-target-new" onclick="startFillBlank('new')">New</button>
@@ -3334,7 +3456,7 @@ textarea { resize: vertical; min-height: 80px; }
 
 <div class="fill-target-dialog" id="recent-progress-dialog" onclick="if(event.target===this)this.classList.remove('visible')">
   <div class="fill-target-card">
-    <h3>Recent (15 days)</h3>
+    <h3 id="recent-progress-title">Recent (15 days)</h3>
     <p style="color:var(--text-dim); font-size:0.9rem; margin:8px 0;">
       You have saved progress: <strong id="recent-progress-info"></strong>
     </p>
@@ -3342,6 +3464,21 @@ textarea { resize: vertical; min-height: 80px; }
     <div style="display:flex; gap:10px;">
       <button class="btn-primary" onclick="continueRecentProgress()" style="flex:1;">Continue</button>
       <button class="btn-secondary" onclick="startOverRecent()" style="flex:1;">Start Over</button>
+    </div>
+  </div>
+</div>
+
+<!-- Concept Drill Resume Dialog -->
+<div class="fill-target-dialog" id="concept-recent-progress-dialog" onclick="if(event.target===this)this.classList.remove('visible')">
+  <div class="fill-target-card">
+    <h3 id="concept-recent-progress-title" style="color:var(--concept);">Recent (15 days)</h3>
+    <p style="color:var(--text-dim); font-size:0.9rem; margin:8px 0;">
+      You have saved progress: <strong id="concept-recent-progress-info"></strong>
+    </p>
+    <p style="color:var(--accent); font-size:0.85rem; margin-bottom:16px;" id="concept-recent-progress-remaining"></p>
+    <div style="display:flex; gap:10px;">
+      <button class="btn-primary" onclick="continueConceptRecentProgress()" style="flex:1;">Continue</button>
+      <button class="btn-secondary" onclick="startOverConceptRecent()" style="flex:1;">Start Over</button>
     </div>
   </div>
 </div>
@@ -3368,6 +3505,49 @@ textarea { resize: vertical; min-height: 80px; }
 </div>
 
 <script>
+// ─── Multi-user namespacing ────────────────────────────────────────────────
+// Lexicon is a single-tenant app per user. The user-id is set once on first
+// launch, saved to localStorage, and sent as X-User-Id on every /api/* request
+// so the server can scope data to the right person. There's no real auth —
+// anyone who knows your id can read your data — but in practice nobody knows
+// what to type. Real Sign in with Apple/Google is a follow-up.
+const USER_ID_KEY = 'lexicon-user-id';
+function sanitizeUserId(raw) {
+  return String(raw || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 50);
+}
+function getCurrentUserId() {
+  let id = localStorage.getItem(USER_ID_KEY);
+  if (id) return id;
+  // No saved id yet → default to 'kevin' immediately. We do NOT call
+  // window.prompt() at module-load time — in iOS WKWebView (Capacitor),
+  // synchronous prompt() can block the JS thread before the page has
+  // rendered, leaving a white screen. Friends can change their username
+  // via the Settings UI later (Dashboard → Settings → Username).
+  id = 'kevin';
+  localStorage.setItem(USER_ID_KEY, id);
+  return id;
+}
+// Resolve once on page load and cache. Sets the value into localStorage if
+// missing, which means the very first window.prompt() blocks the page until
+// the user answers — by design, since we can't make API calls without an id.
+const CURRENT_USER_ID = getCurrentUserId();
+
+// Inject X-User-Id on every /api/* fetch so all server requests are scoped to
+// this user. Wrapping the global fetch covers BOTH apiFetch (POST helper) and
+// raw fetch() calls (GET/PUT). Service worker passes the header through.
+const _origFetch = window.fetch.bind(window);
+window.fetch = function(input, init) {
+  const url = typeof input === 'string' ? input : (input && input.url) || '';
+  if (url.startsWith('/api/') || url.includes('/api/')) {
+    init = init || {};
+    init.headers = new Headers(init.headers || {});
+    if (!init.headers.has('X-User-Id')) {
+      init.headers.set('X-User-Id', CURRENT_USER_ID);
+    }
+  }
+  return _origFetch(input, init);
+};
+
 // ─── Data ───────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'idiom-quiz-cards';
@@ -3933,27 +4113,21 @@ function getMasteredCards() {
 }
 
 function updateDashboard() {
-  const due = getDueCards();
-
   // Bucket counts
   document.getElementById('nope-count').textContent = cards.filter(c => c.bucket === 'nope').length;
   document.getElementById('kinda-count').textContent = cards.filter(c => c.bucket === 'kinda').length;
   document.getElementById('nailed-count').textContent = cards.filter(c => c.bucket === 'nailed').length;
-  document.getElementById('skip-count').textContent = cards.filter(c => c.bucket === 'skip').length;
+  document.getElementById('all-count').textContent = cards.length;
   document.getElementById('new-count').textContent = cards.filter(c => !c.bucket).length;
 
-  const noDue = due.length === 0;
   const noCards = cards.length === 0;
   const noDailyEligible = cards.filter(c => (c.bucket || '') !== 'skip').length === 0;
   const fillBtn = document.getElementById('start-fill-blank-btn');
   const dailyBtn = document.getElementById('start-daily-btn');
-  const writeBtn = document.getElementById('start-write-sentence-btn');
   fillBtn.disabled = noCards;
   if (dailyBtn) dailyBtn.disabled = noDailyEligible;
-  writeBtn.disabled = noDue;
   fillBtn.textContent = noCards ? 'No cards yet' : 'Fill in the Blank';
   if (dailyBtn) dailyBtn.textContent = noDailyEligible ? 'No cards yet' : 'Daily Mode';
-  writeBtn.textContent = noDue ? 'Nothing due — come back later' : 'Write a Sentence';
   renderCalendar();
 }
 
@@ -4079,10 +4253,10 @@ let viewingPrevious = false; // true when browsing back through history
 let historyBrowseIndex = -1; // position within reviewHistory when browsing
 
 function getCardsByBucket(bucket) {
-  if (!bucket) return getDueCards();
+  if (!bucket) return cards.filter(c => (c.bucket || '') !== 'skip');
   if (bucket === 'new') return cards.filter(c => !c.bucket);
-  if (bucket === 'recent' || bucket === 'recent5') {
-    const days = bucket === 'recent5' ? 5 : 15;
+  if (bucket === 'recent' || bucket === 'recent5' || bucket === 'recent1') {
+    const days = bucket === 'recent1' ? 1 : (bucket === 'recent5' ? 5 : 15);
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
     const cutoffStr = cutoff.toISOString().slice(0, 10);
@@ -4097,6 +4271,7 @@ function getCardsByBucket(bucket) {
 function bucketLabel(bucket) {
   const labels = {
     daily: 'Daily Mode',
+    recent1: 'Recent (1 day)',
     recent5: 'Recent (5 days)',
     recent: 'Recent (15 days)',
     new: 'New',
@@ -4253,46 +4428,61 @@ function onFillTargetBackdrop(event) {
   }
 }
 
-const RECENT_PROGRESS_KEY = 'lexicon-recent-progress';
+const RECENT_PROGRESS_KEY_BASE = 'lexicon-recent-progress';
 
-function getRecentProgress() {
-  try { return JSON.parse(localStorage.getItem(RECENT_PROGRESS_KEY)) || null; } catch { return null; }
+function recentProgressKey(bucket) {
+  // 15-day uses the original (un-suffixed) key for backwards compat with
+  // existing localStorage; 5-day and 1-day get their own keys so they don't collide.
+  if (bucket === 'recent5') return `${RECENT_PROGRESS_KEY_BASE}-5`;
+  if (bucket === 'recent1') return `${RECENT_PROGRESS_KEY_BASE}-1`;
+  return RECENT_PROGRESS_KEY_BASE;
+}
+
+function getRecentProgress(bucket) {
+  try { return JSON.parse(localStorage.getItem(recentProgressKey(bucket))) || null; } catch { return null; }
 }
 
 function saveRecentProgress() {
-  if (fillBlankTarget !== 'recent') return;
+  if (fillBlankTarget !== 'recent' && fillBlankTarget !== 'recent5' && fillBlankTarget !== 'recent1') return;
   const completedIds = reviewQueue.slice(0, reviewIndex).map(c => c.phrase);
-  localStorage.setItem(RECENT_PROGRESS_KEY, JSON.stringify({
+  localStorage.setItem(recentProgressKey(fillBlankTarget), JSON.stringify({
     completedIds,
     total: reviewQueue.length + completedIds.length,
     savedAt: new Date().toISOString()
   }));
 }
 
-function clearRecentProgress() {
-  localStorage.removeItem(RECENT_PROGRESS_KEY);
+function clearRecentProgress(bucket) {
+  if (bucket) localStorage.removeItem(recentProgressKey(bucket));
+  else {
+    localStorage.removeItem(recentProgressKey('recent'));
+    localStorage.removeItem(recentProgressKey('recent5'));
+    localStorage.removeItem(recentProgressKey('recent1'));
+  }
 }
 
 function startFillBlank(bucket) {
-  // For 'recent' bucket, check for saved progress
-  if (bucket === 'recent') {
-    const progress = getRecentProgress();
-    const allRecent = getCardsByBucket('recent');
+  // For recent buckets (1-day, 5-day, or 15-day), check for saved progress
+  if (bucket === 'recent' || bucket === 'recent5' || bucket === 'recent1') {
+    const progress = getRecentProgress(bucket);
+    const allRecent = getCardsByBucket(bucket);
     if (progress && progress.completedIds.length > 0) {
       const remaining = allRecent.filter(c => !progress.completedIds.includes(c.phrase));
       if (remaining.length > 0) {
         // Show continue/start-over dialog
         closeFillBlankTargetDialog();
         const d = document.getElementById('recent-progress-dialog');
+        document.getElementById('recent-progress-title').textContent = bucketLabel(bucket);
         document.getElementById('recent-progress-info').textContent =
           `${progress.completedIds.length} of ${allRecent.length} completed`;
         document.getElementById('recent-progress-remaining').textContent =
           `${remaining.length} remaining`;
+        d.dataset.bucket = bucket;
         d.classList.add('visible');
         return;
       } else {
         // All done — clear and start fresh
-        clearRecentProgress();
+        clearRecentProgress(bucket);
       }
     }
   }
@@ -4301,13 +4491,15 @@ function startFillBlank(bucket) {
 }
 
 function continueRecentProgress() {
-  document.getElementById('recent-progress-dialog').classList.remove('visible');
-  const progress = getRecentProgress();
-  const allRecent = getCardsByBucket('recent');
+  const d = document.getElementById('recent-progress-dialog');
+  d.classList.remove('visible');
+  const bucket = d.dataset.bucket || 'recent';
+  const progress = getRecentProgress(bucket);
+  const allRecent = getCardsByBucket(bucket);
   const remaining = allRecent.filter(c => !progress.completedIds.includes(c.phrase));
 
   reviewMode = 'fill-blank';
-  fillBlankTarget = 'recent';
+  fillBlankTarget = bucket;
   reviewQueue = remaining.sort(() => Math.random() - 0.5);
   reviewIndex = 0;
   blankCache.clear();
@@ -4318,9 +4510,11 @@ function continueRecentProgress() {
 }
 
 function startOverRecent() {
-  document.getElementById('recent-progress-dialog').classList.remove('visible');
-  clearRecentProgress();
-  _doStartFillBlank('recent');
+  const d = document.getElementById('recent-progress-dialog');
+  d.classList.remove('visible');
+  const bucket = d.dataset.bucket || 'recent';
+  clearRecentProgress(bucket);
+  _doStartFillBlank(bucket);
 }
 
 function _doStartFillBlank(bucket) {
@@ -4535,6 +4729,7 @@ function onFlashcardTap() {
 function revealAnswer() {
   if (answerRevealed) return;
   answerRevealed = true;
+  buzz('LIGHT');
   document.getElementById('review').classList.add('answer-revealed');
 
   const card = reviewQueue[reviewIndex];
@@ -4663,7 +4858,12 @@ function preloadBlank(card) {
   if (card.blankInstruction) reqBody.blankInstruction = card.blankInstruction;
   const promise = apiFetch('/api/generate-blank', reqBody
   ).then(r => {
-    if (!r.ok) throw new Error('Failed to generate');
+    // Service worker can return undefined when offline (no cached match for
+    // this exact request body). Treat as a network error so the catch in
+    // showFillBlank surfaces a clear message instead of a cryptic
+    // "Cannot read properties of undefined".
+    if (!r) throw new Error('Network unavailable — check your connection');
+    if (!r.ok) throw new Error(`Server returned ${r.status}`);
     return r.json();
   });
   blankCache.set(card.id, promise);
@@ -4724,14 +4924,27 @@ async function showFillBlank() {
     submitBtn.disabled = false;
   } catch (err) {
     blankCache.delete(card.id);
-    sentenceEl.textContent = 'Failed to generate sentence. Try again.';
-    showToast('Error generating blank: ' + err.message);
+    const msg = (err && err.message) || 'Unknown error';
+    sentenceEl.innerHTML =
+      `<div style="color:var(--red); margin-bottom:10px;">Failed to generate sentence.</div>` +
+      `<div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:12px;">${escapeHtml(msg)}</div>` +
+      `<button class="btn-primary" onclick="retryBlank()" style="background:var(--accent);">↻ Retry</button>`;
+    showToast('Error generating blank: ' + msg);
   } finally {
     sentenceEl.style.opacity = '1';
   }
 
   // Preload next cards in background
   preloadUpcoming();
+}
+
+// Retry the current card's blank generation. Drops the cached (rejected)
+// promise and re-runs the showFillBlank flow.
+function retryBlank() {
+  const card = reviewQueue[reviewIndex];
+  if (!card) return;
+  blankCache.delete(card.id);
+  showFillBlank();
 }
 
 function showFilledSentence() {
@@ -4772,6 +4985,7 @@ function showFilledSentence() {
 // full card, then self-rates Nope/Kinda/Nailed. No typing, no LLM check.
 function submitBlankAnswer() {
   if (!currentBlankData) return;
+  buzz('LIGHT');
   const card = reviewQueue[reviewIndex];
 
   // Surface the correct answer in the feedback panel as a simple "the answer is..."
@@ -4797,7 +5011,9 @@ function submitBlankAnswer() {
   document.getElementById('answer-section').classList.add('visible');
   if (card.source) document.getElementById('card-source').style.display = 'block';
   if (!card.example) fetchExample(card);
-  setTimeout(() => fb.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+  if (!isDesktopUI()) {
+    setTimeout(() => fb.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+  }
 }
 
 async function getBlankHint() {
@@ -4967,6 +5183,11 @@ async function submitRefineFeedback() {
 function rateCard(quality) {
   viewingPrevious = false;
   historyBrowseIndex = -1;
+  // Haptic: ERROR for Nope, MEDIUM for Kinda, SUCCESS for Nailed, LIGHT for skip.
+  if (quality === 0) buzzNotify('ERROR');
+  else if (quality === 3) buzz('MEDIUM');
+  else if (quality === 5) buzzNotify('SUCCESS');
+  else buzz('LIGHT');
   const card = reviewQueue[reviewIndex];
   reviewHistory.push(reviewIndex);
 
@@ -5035,8 +5256,8 @@ function skipCurrentCard() {
 }
 
 function endReview() {
-  if (fillBlankTarget === 'recent' && reviewIndex >= reviewQueue.length) {
-    clearRecentProgress(); // completed all — reset
+  if ((fillBlankTarget === 'recent' || fillBlankTarget === 'recent5' || fillBlankTarget === 'recent1') && reviewIndex >= reviewQueue.length) {
+    clearRecentProgress(fillBlankTarget); // completed all — reset
   }
   if (fillBlankTarget === 'daily') {
     showScreen('dashboard');
@@ -5107,8 +5328,9 @@ function setFilter(filter) {
 }
 
 function showBucket(bucket) {
-  const labels = { nope: 'Nope', kinda: 'Kinda', nailed: 'Nailed it', skip: 'Not Useful', new: 'New' };
-  activeBucket = bucket;
+  const labels = { nope: 'Nope', kinda: 'Kinda', nailed: 'Nailed it', skip: 'Not Useful', new: 'New', all: 'All Cards' };
+  // 'all' is the no-filter case — set activeBucket to null so renderBrowseList shows everything.
+  activeBucket = (bucket === 'all') ? null : bucket;
   showScreen('browse');
   document.getElementById('browse-title').textContent = labels[bucket] || 'Browse';
   document.getElementById('search-input').value = '';
@@ -5161,18 +5383,7 @@ function renderBrowseList() {
   }
 
   list.innerHTML = filtered.map(card => {
-    let statusClass, statusText;
-    if (card.interval >= 21) {
-      statusClass = 'status-mastered';
-      statusText = 'Mastered';
-    } else if (card.nextReview <= today) {
-      statusClass = 'status-due';
-      statusText = 'Due';
-    } else {
-      statusClass = 'status-learning';
-      statusText = 'In ' + formatInterval(Math.max(1, Math.ceil((new Date(card.nextReview) - new Date(today)) / 86400000)));
-    }
-
+    const isMastered = card.interval >= 21;
     const tagPills = (card.tags || []).map(t =>
       `<span style="font-size:0.65rem; padding:1px 7px; border-radius:8px; background:rgba(139,92,246,0.12); color:var(--concept); font-weight:600;">${escapeHtml(t)}</span>`
     ).join(' ');
@@ -5184,7 +5395,7 @@ function renderBrowseList() {
           ${tagPills ? `<div style="margin-top:4px; display:flex; gap:4px; flex-wrap:wrap;">${tagPills}</div>` : ''}
           ${card.source ? `<div class="card-source">${escapeHtml(card.source)}</div>` : ''}
         </div>
-        <span class="card-status ${statusClass}">${statusText}</span>
+        ${isMastered ? `<span class="card-status status-mastered">Mastered</span>` : ''}
       </div>
     `;
   }).join('');
@@ -5225,12 +5436,9 @@ function viewCard(id) {
   if (card.bucket) {
     badges.push(`<span style="font-size:0.7rem; padding:3px 9px; border-radius:10px; background:rgba(99,102,241,0.15); color:var(--accent); font-weight:600;">${escapeHtml(card.bucket)}</span>`);
   }
-  const today = getToday();
-  let statusText, statusColor;
-  if (card.interval >= 21) { statusText = 'Mastered'; statusColor = 'var(--green)'; }
-  else if (card.nextReview <= today) { statusText = 'Due'; statusColor = 'var(--orange)'; }
-  else { statusText = 'In ' + formatInterval(Math.max(1, Math.ceil((new Date(card.nextReview) - new Date(today)) / 86400000))); statusColor = 'var(--text-dim)'; }
-  badges.push(`<span style="font-size:0.7rem; padding:3px 9px; border-radius:10px; background:rgba(255,255,255,0.04); color:${statusColor}; font-weight:600;">${statusText}</span>`);
+  if (card.interval >= 21) {
+    badges.push(`<span style="font-size:0.7rem; padding:3px 9px; border-radius:10px; background:rgba(255,255,255,0.04); color:var(--green); font-weight:600;">Mastered</span>`);
+  }
   document.getElementById('cv-card-badges').innerHTML = badges.join('');
 
   document.getElementById('cv-card-meaning').textContent = card.meaning || '';
@@ -5457,7 +5665,7 @@ let lookupData = null;
 
 function showLookup() {
   // Clear all inputs and results
-  ['lookup-input','translate-input','reverse-input','vibe-input','critique-sentence','critique-word','critique-meaning','critique-constraint','synonym-input','polish-input','complete-input','complete-meaning','en2zh-input'].forEach(id => {
+  ['lookup-input','translate-input','reverse-input','vibe-input','critique-sentence','critique-word','critique-meaning','critique-constraint','synonym-input','polish-input','complete-input','complete-meaning','complete-constraint','en2zh-input'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -5478,6 +5686,22 @@ function showLookup() {
   lookupData = null;
   showScreen('lookup');
   updateLookupBadges();
+  // Hydrate the side-panel scratchpad: cached value first for instant render,
+  // then fetch the latest from the server. Mirrors showScratchpad's behavior.
+  const padEl = document.getElementById('lookup-scratchpad-input');
+  if (padEl) {
+    padEl.value = localStorage.getItem(SCRATCHPAD_KEY) || '';
+    fetch('/api/scratchpad').then(r => r.ok ? r.json() : null).then(data => {
+      if (!data || typeof data.text !== 'string') return;
+      const local = localStorage.getItem(SCRATCHPAD_KEY) || '';
+      if (data.text !== local) {
+        padEl.value = data.text;
+        localStorage.setItem(SCRATCHPAD_KEY, data.text);
+        const main = document.getElementById('scratchpad-input');
+        if (main) main.value = data.text;
+      }
+    }).catch(() => {});
+  }
 }
 
 // ─── Look Up Usage Tracking ─────────────────────────────────────────────
@@ -6165,20 +6389,42 @@ async function addWordFromCritique(btn, phrase) {
   }
 }
 
-// Allow Enter key to trigger lookup
+// Allow Enter key to trigger lookup actions across every Look Up section.
+// Plain text inputs: Enter submits. Textareas: Cmd/Ctrl+Enter submits
+// (regular Enter still inserts a newline so multi-line edits aren't broken).
+const LOOKUP_ENTER_HANDLERS = {
+  'lookup-input': doLookup,
+  'complete-input': doComplete,
+  'complete-meaning': doComplete,
+  'complete-constraint': doComplete,
+  'reverse-input': doReverseLookup,
+  'synonym-input': doSynonyms,
+  'critique-sentence': doCritique,
+  'critique-word': doCritique,
+  'critique-meaning': doCritique,
+  'critique-constraint': doCritique,
+  'translate-input': doTranslate,
+  'en2zh-input': doTranslateEn2Zh,
+  // Textareas — submit only on Cmd/Ctrl+Enter
+  'vibe-input': doNameVibe,
+  'polish-input': doPolish,
+};
+const LOOKUP_TEXTAREA_IDS = new Set(['vibe-input', 'polish-input']);
+
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && document.activeElement?.id === 'lookup-input') {
-    e.preventDefault();
-    doLookup();
+  if (e.key !== 'Enter') return;
+  const id = document.activeElement && document.activeElement.id;
+  const handler = LOOKUP_ENTER_HANDLERS[id];
+  if (!handler) return;
+  if (LOOKUP_TEXTAREA_IDS.has(id)) {
+    // Textareas: only fire on Cmd/Ctrl+Enter so plain Enter keeps newlines
+    if (!(e.metaKey || e.ctrlKey)) return;
+  } else if (e.shiftKey) {
+    // Shift+Enter on regular inputs: do nothing special, let default happen
+    return;
   }
-  if (e.key === 'Enter' && document.activeElement?.id === 'reverse-input') {
-    e.preventDefault();
-    doReverseLookup();
-  }
-  if (e.key === 'Enter' && document.activeElement?.id === 'critique-word') {
-    e.preventDefault();
-    doCritique();
-  }
+  e.preventDefault();
+  try { handler(); } catch (err) { console.warn('lookup handler error:', err); }
 });
 
 // ─── Word Choice Critique ────────────────────────────────────────────────
@@ -6373,6 +6619,7 @@ async function doComplete() {
   const input = document.getElementById('complete-input');
   const text = input.value.trim();
   const meaning = (document.getElementById('complete-meaning')?.value || '').trim();
+  const constraint = (document.getElementById('complete-constraint')?.value || '').trim();
   if (!text && !meaning) { showToast('Type your sentence or meaning first'); return; }
   trackLookupUsage('complete');
 
@@ -6381,37 +6628,11 @@ async function doComplete() {
   btn.textContent = 'Thinking...';
 
   try {
-    const response = await apiFetch('/api/complete-sentence', { text, meaning });
+    const response = await apiFetch('/api/complete-sentence', { text, meaning, constraint });
     if (!response.ok) throw new Error('API error');
     const result = await response.json();
-    const container = document.getElementById('complete-result');
-
-    let html = `<div class="lookup-result-header"><span style="font-weight:600; font-size:0.8rem; color:var(--text-dim);">Result</span><button class="lookup-clear-btn" onclick="clearLookupResult('complete-result')">✕ Clear</button></div>`;
-    html += `<div style="background:var(--surface1); border-radius:10px; padding:14px; margin-bottom:12px;">`;
-    html += `<div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:4px;">Completed sentence</div>`;
-    html += `<div style="font-size:1rem; font-weight:500;">${result.completedSentence}</div>`;
-    html += `</div>`;
-
-    if (result.phrases && result.phrases.length) {
-      result.phrases.forEach((p, i) => {
-        const isDupe = cards.some(c => c.phrase.toLowerCase() === p.phrase.toLowerCase());
-        html += `<div class="qa-card" style="margin-bottom:10px;">`;
-        html += `<div class="qa-card-header">`;
-        html += `<span class="phrase">${p.phrase}</span>`;
-        html += `<button class="btn-speak btn-speak-inline" onclick="speakText(this, '${p.phrase.replace(/'/g, "\\'")}')" title="Hear pronunciation">&#128264;</button>`;
-        html += `<span class="tag">${p.category || 'phrase'}</span>`;
-        if (isDupe) html += `<span class="dupe-tag">already in deck</span>`;
-        html += `</div>`;
-        html += `<div style="margin-top:6px;"><span style="font-size:0.8rem; color:var(--text-dim);">Meaning</span><div style="font-size:0.9rem; margin-top:2px;">${p.meaning}</div></div>`;
-        html += `<div class="example-row"><span class="example-text">${p.example}</span></div>`;
-        if (!isDupe) html += `<button class="btn-secondary" onclick="completeAddCard(${i})" style="width:100%; margin-top:8px; font-size:0.85rem;">Add to Deck</button>`;
-        if (isDupe) html += `<button class="btn-secondary" onclick="bumpCardToRecent('${escapeHtml(p.phrase).replace(/'/g, "\\'")}', this)" style="width:100%; margin-top:4px; font-size:0.85rem;">↑ Bump to Recent (15-day quiz)</button>`;
-        html += `</div>`;
-      });
-    }
-    container.innerHTML = html;
-    container.style.display = 'block';
     window._completeResult = result;
+    renderCompleteResult(result);
   } catch (err) {
     showToast('Failed to complete sentence');
   } finally {
@@ -6420,26 +6641,62 @@ async function doComplete() {
   }
 }
 
-function completeAddCard(idx) {
+function renderCompleteResult(result) {
+  if (!result) return;
+  const container = document.getElementById('complete-result');
+  let html = `<div class="lookup-result-header"><span style="font-weight:600; font-size:0.8rem; color:var(--text-dim);">Result</span><button class="lookup-clear-btn" onclick="clearLookupResult('complete-result')">✕ Clear</button></div>`;
+  html += `<div style="background:var(--surface1); border-radius:10px; padding:14px; margin-bottom:12px;">`;
+  html += `<div style="font-size:0.8rem; color:var(--text-dim); margin-bottom:4px;">Completed sentence</div>`;
+  html += `<div style="font-size:1rem; font-weight:500;">${result.completedSentence}</div>`;
+  html += `</div>`;
+  if (result.phrases && result.phrases.length) {
+    result.phrases.forEach((p, i) => {
+      const isDupe = cards.some(c => c.phrase.toLowerCase() === p.phrase.toLowerCase());
+      html += `<div class="qa-card" style="margin-bottom:10px;">`;
+      html += `<div class="qa-card-header">`;
+      html += `<span class="phrase">${p.phrase}</span>`;
+      html += `<button class="btn-speak btn-speak-inline" onclick="speakText(this, '${p.phrase.replace(/'/g, "\\'")}')" title="Hear pronunciation">&#128264;</button>`;
+      html += `<span class="tag">${p.category || 'phrase'}</span>`;
+      if (isDupe) html += `<span class="dupe-tag">already in deck</span>`;
+      html += `</div>`;
+      html += `<div style="margin-top:6px;"><span style="font-size:0.8rem; color:var(--text-dim);">Meaning</span><div style="font-size:0.9rem; margin-top:2px;">${p.meaning}</div></div>`;
+      html += `<div class="example-row"><span class="example-text">${p.example}</span></div>`;
+      if (!isDupe) html += `<button class="btn-secondary" onclick="completeAddCard(${i})" style="width:100%; margin-top:8px; font-size:0.85rem;">Add to Deck</button>`;
+      if (isDupe) html += `<button class="btn-secondary" onclick="bumpCardToRecent('${escapeHtml(p.phrase).replace(/'/g, "\\'")}', this)" style="width:100%; margin-top:4px; font-size:0.85rem;">↑ Bump to Recent (15-day quiz)</button>`;
+      html += `</div>`;
+    });
+  }
+  container.innerHTML = html;
+  container.style.display = 'block';
+}
+
+async function completeAddCard(idx) {
   const p = window._completeResult?.phrases?.[idx];
   if (!p) return;
   const isDupe = cards.some(c => c.phrase.toLowerCase() === p.phrase.toLowerCase());
   if (isDupe) { showToast('Already in deck'); return; }
-  cards.push({
+  const today = getToday();
+  const now = new Date().toISOString();
+  cards.unshift({
+    id: generateId(),
     phrase: p.phrase,
     meaning: p.meaning,
     example: p.example,
     category: p.category || 'phrase',
+    bucket: undefined,
+    createdAt: now,
     source: 'Complete Sentence',
-    sourceContext: document.getElementById('complete-input').value.trim(),
-    dateAdded: new Date().toISOString(),
-    ratingHistory: { nailed: 0, kinda: 0, nope: 0 },
-    easeFactor: 2.5, interval: 0, repetitions: 0,
-    nextReview: getToday(), lastReview: null,
+    sourceContext: document.getElementById('complete-input').value.trim() || null,
+    easeFactor: 2.5,
+    interval: 0,
+    repetitions: 0,
+    nextReview: today,
+    lastReview: null,
   });
-  saveCards(cards);
+  await saveCards(cards);
+  updateDashboard();
   showToast(`Added "${p.phrase}"`);
-  doComplete(); // re-render to show dupe tag
+  renderCompleteResult(window._completeResult); // refresh so the row shows "already in deck"
 }
 
 // ─── English → Chinese ──────────────────────────────────────────────────
@@ -6518,10 +6775,20 @@ async function showScratchpad() {
   } catch {}
 }
 
-function saveScratchpad() {
-  const text = document.getElementById('scratchpad-input').value;
+// Two textareas (the dedicated Scratchpad screen and the side panel on the
+// Look Up screen) both edit the same underlying scratchpad. Whichever fires
+// `oninput` passes its current value via `text`. The other textarea is mirrored
+// so they stay in sync, then we localStorage + debounce-save to the server.
+function saveScratchpad(text) {
+  if (text === undefined) {
+    const main = document.getElementById('scratchpad-input');
+    text = main ? main.value : '';
+  }
   localStorage.setItem(SCRATCHPAD_KEY, text);
-  // Debounce server sync so we don't hammer it on every keystroke
+  ['scratchpad-input', 'lookup-scratchpad-input'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.value !== text) el.value = text;
+  });
   if (scratchpadSyncTimer) clearTimeout(scratchpadSyncTimer);
   scratchpadSyncTimer = setTimeout(() => {
     fetch('/api/scratchpad', {
@@ -6719,10 +6986,16 @@ let quickAddResults = []; // staged results before confirm
 let triageRows = [];
 
 const TRIAGE_TOOLS = [
-  { key: 'lookup',     label: 'Look up word',         desc: 'Get definition + example for a vocab word',         icon: '🔍' },
-  { key: 'reverse',    label: 'Describe what you mean', desc: 'You described a concept, get the right word/phrase', icon: '🧠' },
-  { key: 'fix-phrase', label: 'Find the right phrase', desc: 'You wrote a phrase that\'s close — find the correct version', icon: '🪄' },
-  { key: 'critique',   label: 'Check my word choice', desc: 'Validate a sentence/word usage',                     icon: '✅' },
+  { key: 'lookup',         label: 'Look up word',          icon: '🔍' },
+  { key: 'reverse',        label: 'Describe what you mean', icon: '🧠' },
+  { key: 'fix-phrase',     label: 'Find the right phrase', icon: '🪄' },
+  { key: 'critique',       label: 'Check my word choice',  icon: '✅' },
+  { key: 'complete',       label: 'Complete the sentence', icon: '✍️' },
+  { key: 'vibe',           label: 'Name the vibe',         icon: '🎭' },
+  { key: 'synonym',        label: 'Synonyms / alternatives', icon: '🔁' },
+  { key: 'polish',         label: 'Polish my sentence',    icon: '✨' },
+  { key: 'translate-zh',   label: 'Translate Chinese → English', icon: '🇨🇳' },
+  { key: 'translate-en2zh',label: 'Translate English → Chinese', icon: '🇺🇸' },
 ];
 
 function quickAddTriage() {
@@ -6734,11 +7007,13 @@ function quickAddTriage() {
   triageRows = lines.map(text => ({
     text,
     tool: 'lookup',
-    sentence: text, // for critique: the full line
-    word: '',       // for critique: which word(s) to check
-    intendedMeaning: '', // for fix-phrase + critique
+    sentence: text,        // for critique: the full line
+    word: '',              // for critique: which word(s) to check
+    intendedMeaning: '',   // for fix-phrase / critique / complete (meaning)
+    constraint: '',        // for critique / complete (e.g. "must start with p")
+    sentiment: 'either',   // for vibe (strongly-positive / lean-positive / either / lean-negative / strongly-negative)
     result: null,
-    status: 'idle', // idle | running | done | error
+    status: 'idle',        // idle | running | done | error
     error: null,
   }));
   document.getElementById('quick-add-step1').style.display = 'none';
@@ -6768,7 +7043,11 @@ function renderTriageRows() {
       <div class="qa-card" style="margin-bottom:12px;" data-triage-index="${i}">
         <div style="display:flex; align-items:flex-start; gap:8px;">
           <div style="flex:1; min-width:0;">
-            <div style="font-weight:600; font-size:0.95rem; color:var(--text); margin-bottom:6px; word-break:break-word;">${escapeHtml(r.text)}</div>
+            <textarea
+              oninput="triageSetField(${i}, 'text', this.value); autoGrowChatTextarea(this);"
+              rows="1"
+              style="width:100%; font-weight:600; font-size:0.95rem; color:var(--text); margin-bottom:6px; padding:6px 8px; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); resize:none; font-family:inherit; line-height:1.4; box-sizing:border-box;"
+              placeholder="Source text (editable)">${escapeHtml(r.text)}</textarea>
             <select onchange="triageSetTool(${i}, this.value)" style="width:100%; max-width:340px; padding:6px 10px; font-size:0.82rem; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text); font-family:inherit;">
               ${optionsHtml}
             </select>
@@ -6783,10 +7062,15 @@ function renderTriageRows() {
         ${resultHtml ? `<div style="margin-top:10px;">${resultHtml}</div>` : ''}
       </div>`;
   }).join('');
+  // Auto-size editable lines on first render
+  container.querySelectorAll('textarea').forEach(autoGrowChatTextarea);
 }
 
 function renderTriageExtras(r, i) {
-  // Conditional extra-input fields per tool. Placeholder labels guide the user.
+  // Conditional extra-input fields per tool. Mirrors the inputs available on
+  // the Look Up screen so the triage row has the same expressive power as
+  // running the same tool from there.
+  const smallInput = 'flex:1; min-width:160px; padding:6px 10px; font-size:0.82rem; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text);';
   if (r.tool === 'fix-phrase') {
     return `
       <div style="margin-top:6px;">
@@ -6801,12 +7085,41 @@ function renderTriageExtras(r, i) {
       <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
         <input type="text" placeholder="Specific word(s) to check (optional)"
           value="${escapeHtml(r.word || '')}"
-          oninput="triageSetField(${i}, 'word', this.value)"
-          style="flex:1; min-width:160px; padding:6px 10px; font-size:0.82rem; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text);">
+          oninput="triageSetField(${i}, 'word', this.value)" style="${smallInput}">
         <input type="text" placeholder="What you meant (optional)"
           value="${escapeHtml(r.intendedMeaning || '')}"
-          oninput="triageSetField(${i}, 'intendedMeaning', this.value)"
-          style="flex:1; min-width:160px; padding:6px 10px; font-size:0.82rem; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text);">
+          oninput="triageSetField(${i}, 'intendedMeaning', this.value)" style="${smallInput}">
+        <input type="text" placeholder='Constraint (optional, e.g. "must be one word")'
+          value="${escapeHtml(r.constraint || '')}"
+          oninput="triageSetField(${i}, 'constraint', this.value)" style="${smallInput}">
+      </div>`;
+  }
+  if (r.tool === 'complete') {
+    return `
+      <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
+        <input type="text" placeholder="Meaning (what the missing word should convey)"
+          value="${escapeHtml(r.intendedMeaning || '')}"
+          oninput="triageSetField(${i}, 'intendedMeaning', this.value)" style="${smallInput}">
+        <input type="text" placeholder='Constraint (e.g. "must start with p", "idiom only")'
+          value="${escapeHtml(r.constraint || '')}"
+          oninput="triageSetField(${i}, 'constraint', this.value)" style="${smallInput}">
+      </div>`;
+  }
+  if (r.tool === 'vibe') {
+    const opts = [
+      ['strongly-positive', 'Strongly positive'],
+      ['lean-positive',     'Lean positive'],
+      ['either',            'Either / neutral'],
+      ['lean-negative',     'Lean negative'],
+      ['strongly-negative', 'Strongly negative'],
+    ];
+    const sel = r.sentiment || 'either';
+    return `
+      <div style="margin-top:6px;">
+        <label style="font-size:0.72rem; color:var(--text-dim); margin-right:6px;">Sentiment</label>
+        <select onchange="triageSetField(${i}, 'sentiment', this.value)" style="padding:5px 8px; font-size:0.82rem; border:1px solid var(--surface2); border-radius:8px; background:var(--surface); color:var(--text); font-family:inherit;">
+          ${opts.map(([v, l]) => `<option value="${v}" ${sel === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
       </div>`;
   }
   return '';
@@ -6863,7 +7176,52 @@ async function triageRunRow(i) {
       r.result = data.results || [];
     } else if (r.tool === 'critique') {
       const word = (r.word || '').trim() || r.text.split(/\s+/).slice(-1)[0]; // last word as fallback
-      const resp = await apiFetch('/api/critique', { sentence: r.text, word, intendedMeaning: r.intendedMeaning || undefined });
+      const resp = await apiFetch('/api/critique', {
+        sentence: r.text,
+        word,
+        intendedMeaning: r.intendedMeaning || undefined,
+        constraint: r.constraint || undefined,
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      r.result = data;
+    } else if (r.tool === 'complete') {
+      const resp = await apiFetch('/api/complete-sentence', {
+        text: r.text,
+        meaning: r.intendedMeaning || '',
+        constraint: r.constraint || '',
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      r.result = data;
+    } else if (r.tool === 'vibe') {
+      const resp = await apiFetch('/api/name-vibe', {
+        description: r.text,
+        sentiment: r.sentiment || 'either',
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      r.result = data.results || [];
+    } else if (r.tool === 'synonym') {
+      const resp = await apiFetch('/api/synonyms', { query: r.text });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      // Flatten groups → single flat array for triage display.
+      const flat = [];
+      (data.groups || []).forEach(g => (g.items || []).forEach(it => flat.push(it)));
+      r.result = flat;
+    } else if (r.tool === 'polish') {
+      const resp = await apiFetch('/api/polish', { sentence: r.text });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      r.result = data;
+    } else if (r.tool === 'translate-zh') {
+      const resp = await apiFetch('/api/translate-zh', { text: r.text });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      r.result = data;
+    } else if (r.tool === 'translate-en2zh') {
+      const resp = await apiFetch('/api/translate-en2zh', { text: r.text });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       r.result = data;
@@ -6905,11 +7263,17 @@ function renderTriageResult(r, i) {
   if (r.tool === 'lookup') {
     return triageRenderSingleCard(r.result, i, -1);
   }
-  if (r.tool === 'reverse' || r.tool === 'fix-phrase') {
+  if (r.tool === 'reverse' || r.tool === 'fix-phrase' || r.tool === 'vibe' || r.tool === 'synonym') {
     if (!Array.isArray(r.result) || r.result.length === 0) {
       return '<div style="color:var(--text-dim); font-size:0.8rem;">No suggestions returned.</div>';
     }
-    const headerLabel = r.tool === 'fix-phrase' ? 'Suggested correct phrasings' : 'Matching phrases';
+    const labels = {
+      'fix-phrase': 'Suggested correct phrasings',
+      reverse: 'Matching phrases',
+      vibe: 'Words for the vibe',
+      synonym: 'Alternatives',
+    };
+    const headerLabel = labels[r.tool] || 'Results';
     return `<div style="font-size:0.7rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px;">${headerLabel}</div>` +
       r.result.map((cand, j) => triageRenderSingleCard(cand, i, j)).join('');
   }
@@ -6928,15 +7292,57 @@ function renderTriageResult(r, i) {
         ${altsHtml ? `<div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;"><span style="font-size:0.7rem; color:var(--text-dim);">Alternatives:</span> ${altsHtml}</div>` : ''}
       </div>`;
   }
+  if (r.tool === 'complete') {
+    const c = r.result || {};
+    const phrases = Array.isArray(c.phrases) ? c.phrases : [];
+    return `
+      <div style="background:var(--surface1); border-radius:10px; padding:10px 12px;">
+        <div style="font-size:0.72rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Completed sentence</div>
+        <div style="font-size:0.95rem; margin-top:4px;">${escapeHtml(c.completedSentence || '')}</div>
+      </div>
+      ${phrases.length ? `<div style="font-size:0.7rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin:10px 0 6px;">Key vocab</div>` + phrases.map((p, j) => triageRenderSingleCard(p, i, j)).join('') : ''}`;
+  }
+  if (r.tool === 'polish') {
+    const p = r.result || {};
+    const phrases = Array.isArray(p.keyPhrases) ? p.keyPhrases : [];
+    return `
+      <div style="background:var(--surface1); border-radius:10px; padding:10px 12px;">
+        <div style="font-size:0.72rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Polished</div>
+        <div style="font-size:0.95rem; margin-top:4px;">${escapeHtml(p.polished || '')}</div>
+      </div>
+      ${phrases.length ? `<div style="font-size:0.7rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin:10px 0 6px;">Key vocab</div>` + phrases.map((kp, j) => triageRenderSingleCard(kp, i, j)).join('') : ''}`;
+  }
+  if (r.tool === 'translate-zh') {
+    const t = r.result || {};
+    const phrases = Array.isArray(t.keyPhrases) ? t.keyPhrases : [];
+    return `
+      <div style="background:var(--surface1); border-radius:10px; padding:10px 12px;">
+        <div style="font-size:0.72rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">English</div>
+        <div style="font-size:0.95rem; margin-top:4px;">${escapeHtml(t.translation || '')}</div>
+      </div>
+      ${phrases.length ? `<div style="font-size:0.7rem; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin:10px 0 6px;">Key vocab</div>` + phrases.map((kp, j) => triageRenderSingleCard(kp, i, j)).join('') : ''}`;
+  }
+  if (r.tool === 'translate-en2zh') {
+    const t = r.result || {};
+    return `
+      <div style="background:var(--surface1); border-radius:10px; padding:10px 12px;">
+        <div style="font-size:0.72rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;">Chinese</div>
+        <div style="font-size:1.05rem; margin-top:4px;">${escapeHtml(t.translation || '')}</div>
+        ${t.pinyin ? `<div style="font-size:0.85rem; color:var(--text-dim); margin-top:4px;">${escapeHtml(t.pinyin)}</div>` : ''}
+        ${t.notes ? `<div style="font-size:0.82rem; color:var(--text-dim); margin-top:6px; padding-top:6px; border-top:1px solid var(--surface2);">${escapeHtml(t.notes)}</div>` : ''}
+      </div>`;
+  }
   return '';
 }
 
 function triageRenderSingleCard(card, rowI, candIdx) {
-  // candIdx === -1 means the row's `result` is itself the card (lookup tool).
-  // Otherwise it's the candIdx-th element of the row's `result` array.
+  // candIdx === -1 means the row's `result` is itself the card (lookup/single tool).
+  // Otherwise it's the candIdx-th element of a flat array OR (for complete/polish/translate-zh)
+  // the candIdx-th item in result.phrases / result.keyPhrases.
   if (!card || !card.phrase) return '';
   const phraseEsc = escapeHtml(card.phrase);
   const isDupe = cards.some(c => c.phrase.toLowerCase() === card.phrase.toLowerCase());
+  const phraseAttr = escapeHtml(card.phrase).replace(/'/g, "\\'");
   return `
     <div class="qa-card" style="margin-top:6px; background:var(--surface1);">
       <div class="qa-card-header">
@@ -6946,16 +7352,29 @@ function triageRenderSingleCard(card, rowI, candIdx) {
       </div>
       <div style="font-size:0.85rem; margin-top:4px;">${escapeHtml(card.meaning || '')}</div>
       ${card.example ? `<div class="example-row"><span class="example-text">${escapeHtml(card.example)}</span></div>` : ''}
-      ${isDupe ? '' : `<button class="btn-primary" onclick="triageAddCard(${rowI}, ${candIdx})" style="margin-top:8px; width:100%; padding:8px; font-size:0.85rem;">Add to Deck</button>`}
+      ${isDupe
+        ? `<button class="btn-secondary" onclick="bumpCardToRecent('${phraseAttr}', this)" style="margin-top:8px; width:100%; padding:7px; font-size:0.82rem;" title="Refresh this card's date so it shows up in your Recent (1/5/15-day) drills">↑ Bump to Recent</button>`
+        : `<button class="btn-primary" onclick="triageAddCard(${rowI}, ${candIdx})" style="margin-top:8px; width:100%; padding:8px; font-size:0.85rem;">Add to Deck</button>`}
     </div>`;
 }
 
 // Looks up the card by row + candidate index (avoids inlining the JSON
 // in onclick, which would break on apostrophes inside meaning/example).
+// Resolve a triage row's candidate card by index across the various result
+// shapes (single card, flat array, or { phrases }/{ keyPhrases } shapes).
+function getTriageCard(r, candIdx) {
+  if (!r || !r.result) return null;
+  if (candIdx === -1) return r.result;
+  if (Array.isArray(r.result)) return r.result[candIdx];
+  if (Array.isArray(r.result.phrases)) return r.result.phrases[candIdx];
+  if (Array.isArray(r.result.keyPhrases)) return r.result.keyPhrases[candIdx];
+  return null;
+}
+
 async function triageAddCard(rowI, candIdx) {
   const r = triageRows[rowI];
   if (!r) return;
-  const card = candIdx === -1 ? r.result : (Array.isArray(r.result) ? r.result[candIdx] : null);
+  const card = getTriageCard(r, candIdx);
   if (!card || !card.phrase) return;
   if (cards.some(c => c.phrase.toLowerCase() === card.phrase.toLowerCase())) {
     showToast('Already in deck');
@@ -6993,7 +7412,29 @@ async function triageAddAlternative(rowI, alt) {
     if (!resp.ok) throw new Error(data.error || 'Lookup failed');
     const card = (data.results && data.results[0]) || null;
     if (!card) throw new Error('No result');
-    await triageAddCard(rowI, card);
+    const r = triageRows[rowI];
+    if (cards.some(c => c.phrase.toLowerCase() === card.phrase.toLowerCase())) {
+      showToast('Already in deck'); return;
+    }
+    const today = getToday();
+    const now = new Date().toISOString();
+    cards.unshift({
+      id: generateId(),
+      phrase: card.phrase,
+      meaning: card.meaning || '',
+      example: card.example || '',
+      category: card.category || 'word',
+      bucket: undefined,
+      createdAt: now,
+      source: 'Quick Add (triage)',
+      sourceContext: (r && r.text) || null,
+      easeFactor: 2.5, interval: 0, repetitions: 0,
+      nextReview: today, lastReview: null,
+    });
+    await saveCards(cards);
+    updateDashboard();
+    showToast(`Added "${card.phrase}"`);
+    renderTriageRows();
   } catch (err) {
     showToast('Error: ' + err.message);
   }
@@ -7344,10 +7785,17 @@ async function evaluateAnswer(phrase, correctMeaning, userAnswer) {
 
 // ─── Typed Answer Flow ──────────────────────────────────────────────────
 
+// Treat hover+fine-pointer as "desktop/laptop". Used to skip mobile-friendly
+// affordances (auto-focus textareas, auto-scroll reveal target into view)
+// that just hijack the keyboard / jump the page on a laptop.
+function isDesktopUI() {
+  return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+}
+
 function showTypeAnswer() {
   document.getElementById('type-answer-section').classList.add('visible');
   document.getElementById('typed-answer').value = '';
-  document.getElementById('typed-answer').focus();
+  if (!isDesktopUI()) document.getElementById('typed-answer').focus();
 }
 
 async function submitTypedAnswer() {
@@ -7374,7 +7822,9 @@ async function submitTypedAnswer() {
       result.verdict === 'correct' ? 'Correct!' :
       result.verdict === 'partial' ? 'Partially correct' : 'Not quite';
     document.getElementById('feedback-explanation').textContent = result.explanation;
-    setTimeout(() => fb.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+    if (!isDesktopUI()) {
+      setTimeout(() => fb.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+    }
 
     // Hide type section, reveal the actual answer on the card
     document.getElementById('type-answer-section').classList.remove('visible');
@@ -7401,6 +7851,53 @@ async function submitTypedAnswer() {
 }
 
 // ─── Utilities ──────────────────────────────────────────────────────────
+
+// Add a body class when running inside the Capacitor iOS shell so we can apply
+// iOS-specific styles (safe-area padding for the Dynamic Island, etc.) without
+// affecting the desktop/web view. Wrapped in try/catch so any Capacitor bridge
+// quirk during init never whites out the app.
+try {
+  if (window.Capacitor?.isNativePlatform?.() && window.Capacitor.getPlatform?.() === 'ios') {
+    document.body.classList.add('is-capacitor-ios');
+    // Schedule the daily 9pm vocab reminder (idempotent — uses a fixed id so
+    // re-running just overwrites). Permission is requested on first call.
+    setupDailyReminder().catch((err) => console.warn('reminder setup failed:', err));
+  }
+} catch (err) {
+  console.warn('Capacitor init failed:', err && err.message);
+}
+
+async function setupDailyReminder() {
+  const LN = window.Capacitor?.Plugins?.LocalNotifications;
+  if (!LN) return;
+  const perm = await LN.requestPermissions();
+  if (perm.display !== 'granted') return;
+  // Cancel any prior schedule first so we don't accumulate duplicates if the
+  // notification body/title ever changes.
+  await LN.cancel({ notifications: [{ id: 1 }] }).catch(() => {});
+  await LN.schedule({
+    notifications: [{
+      id: 1,
+      title: 'Lexicon',
+      body: "Time to drill today's words.",
+      schedule: { on: { hour: 21, minute: 0 }, allowWhileIdle: true },
+    }],
+  });
+}
+
+// Native iOS haptic feedback via Capacitor. No-op outside the iOS shell
+// (web / Android / Safari PWA). Style for impact: 'LIGHT' | 'MEDIUM' | 'HEAVY'.
+// Type for notification: 'SUCCESS' | 'WARNING' | 'ERROR'.
+function buzz(style = 'LIGHT') {
+  const H = window.Capacitor?.Plugins?.Haptics;
+  if (!H) return;
+  H.impact({ style }).catch(() => {});
+}
+function buzzNotify(type) {
+  const H = window.Capacitor?.Plugins?.Haptics;
+  if (!H) return;
+  H.notification({ type }).catch(() => {});
+}
 
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -7561,6 +8058,111 @@ function showToast(msg) {
   setTimeout(() => el.classList.remove('show'), 2500);
 }
 
+// ─── Edge-swipe-back gesture ────────────────────────────────────────────
+// Drag right from the left edge of the screen to peel the current screen
+// away iOS-style. Live drag follows the finger; release past threshold
+// completes the back navigation with a slide-out animation, otherwise
+// snaps back. Works for our SPA's showScreen() navigation (the native
+// WKWebView gesture only handles browser history, which we don't use).
+(function setupEdgeSwipeBack() {
+  let startX = 0, startY = 0, tracking = false, dragging = false, startedAt = 0;
+  let activeScreen = null;
+  const EDGE_THRESHOLD = 30;      // touch must START within 30px of left edge
+  const DRAG_ACTIVATE = 8;        // need to move > 8px before we start dragging
+  const VERTICAL_TOLERANCE = 30;  // vertical drift this big → cancel
+  const COMPLETE_THRESHOLD_PX = 90;
+  const COMPLETE_THRESHOLD_PCT = 0.35; // OR > 35% of viewport width
+  const FAST_SWIPE_VELOCITY = 0.5;     // px/ms — fast flick completes regardless
+
+  function clearTransform(screen) {
+    screen.style.transition = '';
+    screen.style.transform = '';
+    screen.style.boxShadow = '';
+  }
+
+  document.addEventListener('touchstart', (e) => {
+    if (!e.touches || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (t.clientX > EDGE_THRESHOLD) return;
+    startX = t.clientX;
+    startY = t.clientY;
+    startedAt = Date.now();
+    tracking = true;
+    dragging = false;
+    activeScreen = document.querySelector('.screen.active');
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!tracking || !e.touches || e.touches.length !== 1 || !activeScreen) return;
+    const t = e.touches[0];
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    if (!dragging) {
+      // Only commit to dragging once horizontal motion clearly dominates.
+      if (Math.abs(dy) > VERTICAL_TOLERANCE) { tracking = false; return; }
+      if (dx < DRAG_ACTIVATE) return;
+      dragging = true;
+      activeScreen.style.transition = 'none';
+      activeScreen.style.willChange = 'transform';
+    }
+    // Track the finger; clamp to >= 0 (no left drag).
+    const visual = Math.max(0, dx);
+    activeScreen.style.transform = `translateX(${visual}px)`;
+    // Subtle drop shadow on the leading edge for depth.
+    activeScreen.style.boxShadow = visual > 4 ? '-8px 0 24px rgba(0,0,0,0.18)' : '';
+  }, { passive: true });
+
+  document.addEventListener('touchend', (e) => {
+    if (!tracking) { return; }
+    tracking = false;
+    if (!dragging || !activeScreen) { activeScreen = null; return; }
+    const screen = activeScreen;
+    activeScreen = null;
+    const t = (e.changedTouches && e.changedTouches[0]) || null;
+    const dx = t ? Math.max(0, t.clientX - startX) : 0;
+    const elapsed = Date.now() - startedAt;
+    const velocity = elapsed > 0 ? dx / elapsed : 0;
+    const widthThreshold = window.innerWidth * COMPLETE_THRESHOLD_PCT;
+    const shouldComplete =
+      dx >= COMPLETE_THRESHOLD_PX ||
+      dx >= widthThreshold ||
+      velocity >= FAST_SWIPE_VELOCITY;
+
+    if (shouldComplete) {
+      // Animate the rest of the way out, then trigger the back action.
+      // The new screen replaces this one mid-animation — visually the user
+      // sees a seamless slide-out.
+      screen.style.transition = 'transform 180ms ease-out, box-shadow 180ms ease-out';
+      screen.style.transform = `translateX(${window.innerWidth}px)`;
+      const finish = () => {
+        screen.removeEventListener('transitionend', finish);
+        const back = screen.querySelector('.header .back');
+        clearTransform(screen);
+        if (back && !back.disabled) back.click();
+      };
+      screen.addEventListener('transitionend', finish);
+      // Fallback in case transitionend doesn't fire (rare iOS quirk).
+      setTimeout(finish, 220);
+    } else {
+      // Snap back.
+      screen.style.transition = 'transform 180ms ease-out, box-shadow 180ms ease-out';
+      screen.style.transform = '';
+      screen.style.boxShadow = '';
+      const reset = () => { screen.removeEventListener('transitionend', reset); clearTransform(screen); };
+      screen.addEventListener('transitionend', reset);
+      setTimeout(reset, 220);
+    }
+  }, { passive: true });
+
+  // If the touch is cancelled (interruption, system gesture), reset cleanly.
+  document.addEventListener('touchcancel', () => {
+    if (activeScreen) clearTransform(activeScreen);
+    tracking = false;
+    dragging = false;
+    activeScreen = null;
+  }, { passive: true });
+})();
+
 // ─── Keyboard shortcuts ─────────────────────────────────────────────────
 
 document.addEventListener('keydown', (e) => {
@@ -7586,13 +8188,25 @@ document.addEventListener('keydown', (e) => {
   if (!answerRevealed) {
     if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
-      revealAnswer();
+      // Fill-blank mode reveals via submitBlankAnswer (it surfaces the
+      // correct answer in the feedback panel before showing the card).
+      const fbVisible = document.getElementById('fill-blank-section')?.classList.contains('visible');
+      if (reviewMode === 'fill-blank' && fbVisible && currentBlankData) {
+        submitBlankAnswer();
+      } else {
+        revealAnswer();
+      }
     }
   } else {
-    if (e.key === '1') rateCard(0); // Again
-    if (e.key === '2') rateCard(3); // Hard
-    if (e.key === '3') rateCard(4); // Good
-    if (e.key === '4') rateCard(5); // Easy
+    // Arrow keys: ← Nope (don't know), ↓ Kinda, → Nailed it
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); rateCard(0); }
+    if (e.key === 'ArrowDown')  { e.preventDefault(); rateCard(3); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); rateCard(5); }
+    // Number shortcuts retained for backwards compat
+    if (e.key === '1') rateCard(0);
+    if (e.key === '2') rateCard(3);
+    if (e.key === '3') rateCard(4);
+    if (e.key === '4') rateCard(5);
   }
 });
 
@@ -7922,15 +8536,10 @@ function backToModuleSelect() {
 }
 
 function updateModuleSelectCounts() {
-  const today = getToday();
-  const vocabDue = cards.filter(c => (c.nextReview || '') <= today && (c.bucket || '') !== 'skip').length;
   document.getElementById('module-vocab-count').textContent =
-    `${cards.length} card${cards.length !== 1 ? 's' : ''}${vocabDue > 0 ? ' · ' + vocabDue + ' due' : ''}`;
-
-  // Library cards aren't drillable — exclude from "due" count
-  const conceptsDue = concepts.filter(c => (c.nextReview || '') <= today && (c.bucket || '') !== 'skip' && (c.bucket || '') !== 'library').length;
+    `${cards.length} card${cards.length !== 1 ? 's' : ''}`;
   document.getElementById('module-concepts-count').textContent =
-    `${concepts.length} concept${concepts.length !== 1 ? 's' : ''}${conceptsDue > 0 ? ' · ' + conceptsDue + ' due' : ''}`;
+    `${concepts.length} concept${concepts.length !== 1 ? 's' : ''}`;
 
   const peopleCount = dossierEntities.filter(e => e.type === 'person').length;
   const firmCount = dossierEntities.filter(e => e.type === 'firm').length;
@@ -7939,6 +8548,14 @@ function updateModuleSelectCounts() {
     dossierEl.textContent = dossierEntities.length === 0
       ? 'Empty — start adding people'
       : `${peopleCount} ${peopleCount === 1 ? 'person' : 'people'} · ${firmCount} ${firmCount === 1 ? 'firm' : 'firms'}`;
+  }
+
+  const qEl = document.getElementById('module-questions-count');
+  if (qEl) {
+    const totalQs = (questionsTopics || []).reduce((n, t) => n + ((t.questions || []).length), 0);
+    qEl.textContent = (questionsTopics && questionsTopics.length)
+      ? `${questionsTopics.length} topic${questionsTopics.length !== 1 ? 's' : ''} · ${totalQs} question${totalQs !== 1 ? 's' : ''}`
+      : 'Empty — capture your first question';
   }
 }
 
@@ -8469,6 +9086,268 @@ window.addEventListener('focus', () => { pullDossierFromServer(); });
 setInterval(() => {
   if (document.visibilityState === 'visible') pullDossierFromServer();
 }, 60000);
+
+// ─── QUESTIONS MODULE ────────────────────────────────────────────────────
+// Plain-text capture: topics → questions. localStorage cache + server sync.
+// No SRS, no AI — just a notepad.
+
+const QUESTIONS_STORAGE_KEY = 'lexicon-questions-topics';
+const QUESTIONS_API_ENDPOINT = '/api/questions';
+
+let questionsTopics = (() => {
+  try {
+    const stored = localStorage.getItem(QUESTIONS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+})();
+
+let currentQuestionTopicId = null;
+
+function saveQuestions() {
+  localStorage.setItem(QUESTIONS_STORAGE_KEY, JSON.stringify(questionsTopics));
+  scheduleQuestionsSync();
+}
+
+let questionsSyncTimer = null;
+let questionsSyncInFlight = false;
+let questionsSyncQueued = false;
+
+function scheduleQuestionsSync() {
+  if (questionsSyncTimer) clearTimeout(questionsSyncTimer);
+  questionsSyncTimer = setTimeout(flushQuestionsSync, 350);
+}
+
+async function flushQuestionsSync() {
+  if (questionsSyncInFlight) { questionsSyncQueued = true; return; }
+  questionsSyncInFlight = true;
+  try {
+    await fetch(QUESTIONS_API_ENDPOINT, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topics: questionsTopics }),
+    });
+  } catch (err) {
+    console.warn('Questions sync error:', err && err.message);
+  } finally {
+    questionsSyncInFlight = false;
+    if (questionsSyncQueued) {
+      questionsSyncQueued = false;
+      scheduleQuestionsSync();
+    }
+  }
+}
+
+async function pullQuestionsFromServer() {
+  try {
+    const r = await fetch(QUESTIONS_API_ENDPOINT, { cache: 'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    const remote = Array.isArray(data?.topics) ? data.topics : [];
+    // Simple last-write-wins by topic id; remote wins for any id present remotely.
+    // Anything we have locally but not remotely is preserved (could be unsynced add).
+    const remoteIds = new Set(remote.map(t => t && t.id).filter(Boolean));
+    const localOnly = questionsTopics.filter(t => t && t.id && !remoteIds.has(t.id));
+    const merged = [...remote, ...localOnly];
+    const changed = JSON.stringify(merged) !== JSON.stringify(questionsTopics);
+    if (changed) {
+      questionsTopics = merged;
+      localStorage.setItem(QUESTIONS_STORAGE_KEY, JSON.stringify(questionsTopics));
+      // Re-render whichever Questions screen is active
+      if (document.getElementById('questions-dashboard').classList.contains('active')) {
+        renderQuestionsTopicsList();
+      }
+      if (document.getElementById('questions-topic-view').classList.contains('active')) {
+        renderQuestionsList();
+      }
+    }
+  } catch {}
+}
+
+pullQuestionsFromServer();
+window.addEventListener('focus', () => { pullQuestionsFromServer(); });
+setInterval(() => {
+  if (document.visibilityState === 'visible') pullQuestionsFromServer();
+}, 60000);
+
+function enterQuestions() {
+  renderQuestionsTopicsList();
+  showScreen('questions-dashboard');
+}
+
+function addQuestionTopic() {
+  const input = document.getElementById('new-topic-input');
+  const title = (input.value || '').trim();
+  if (!title) { showToast('Type a topic name first'); return; }
+  const now = new Date().toISOString();
+  const topic = {
+    id: 'topic_' + generateId(),
+    title,
+    createdAt: now,
+    updatedAt: now,
+    questions: [],
+  };
+  questionsTopics.unshift(topic);
+  saveQuestions();
+  input.value = '';
+  renderQuestionsTopicsList();
+}
+
+function renderQuestionsTopicsList() {
+  const list = document.getElementById('questions-topics-list');
+  if (!list) return;
+  if (!questionsTopics.length) {
+    list.innerHTML = `<div style="text-align:center; color:var(--text-dim); padding:40px 20px; font-size:0.9rem;">No topics yet. Add one above.</div>`;
+    return;
+  }
+  // Sort by updatedAt desc
+  const sorted = [...questionsTopics].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  list.innerHTML = sorted.map(t => {
+    const count = (t.questions || []).length;
+    const safeTitle = escapeHtml(t.title || 'Untitled');
+    return `<div onclick="openQuestionTopic('${t.id}')" style="background:var(--surface); border:1px solid var(--surface2); border-radius:12px; padding:14px 16px; margin-bottom:10px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:border-color 0.15s;" onmouseover="this.style.borderColor='var(--orange)'" onmouseout="this.style.borderColor='var(--surface2)'">
+      <div style="flex:1; min-width:0;">
+        <div style="font-weight:600; font-size:1rem; color:var(--text);">${safeTitle}</div>
+        <div style="font-size:0.78rem; color:var(--text-dim); margin-top:3px;">${count} question${count !== 1 ? 's' : ''}</div>
+      </div>
+      <div style="color:var(--text-dim); font-size:1.2rem;">›</div>
+    </div>`;
+  }).join('');
+}
+
+function openQuestionTopic(id) {
+  const topic = questionsTopics.find(t => t.id === id);
+  if (!topic) { showToast('Topic not found'); return; }
+  currentQuestionTopicId = id;
+  document.getElementById('qt-topic-title').textContent = topic.title || 'Untitled';
+  document.getElementById('new-question-input').value = '';
+  const orig = document.getElementById('polish-question-original');
+  if (orig) orig.style.display = 'none';
+  renderQuestionsList();
+  showScreen('questions-topic-view');
+}
+
+function addQuestion() {
+  if (!currentQuestionTopicId) return;
+  const input = document.getElementById('new-question-input');
+  const text = (input.value || '').trim();
+  if (!text) { showToast('Type a question first'); return; }
+  const topic = questionsTopics.find(t => t.id === currentQuestionTopicId);
+  if (!topic) return;
+  const now = new Date().toISOString();
+  if (!Array.isArray(topic.questions)) topic.questions = [];
+  topic.questions.unshift({
+    id: 'q_' + generateId(),
+    text,
+    createdAt: now,
+  });
+  topic.updatedAt = now;
+  saveQuestions();
+  input.value = '';
+  // Reset textarea height after auto-grow
+  input.style.height = '';
+  const orig = document.getElementById('polish-question-original');
+  if (orig) orig.style.display = 'none';
+  renderQuestionsList();
+}
+
+function renderQuestionsList() {
+  const list = document.getElementById('qt-questions-list');
+  if (!list) return;
+  const topic = questionsTopics.find(t => t.id === currentQuestionTopicId);
+  if (!topic) { list.innerHTML = ''; return; }
+  const qs = Array.isArray(topic.questions) ? topic.questions : [];
+  if (!qs.length) {
+    list.innerHTML = `<div style="text-align:center; color:var(--text-dim); padding:30px 20px; font-size:0.9rem;">No questions yet. Add one above.</div>`;
+    return;
+  }
+  list.innerHTML = qs.map(q => {
+    const date = q.createdAt ? new Date(q.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+    return `<div style="background:var(--surface); border:1px solid var(--surface2); border-radius:12px; padding:12px 14px; margin-bottom:8px;">
+      <div style="white-space:pre-wrap; font-size:0.95rem; line-height:1.55; color:var(--text);">${escapeHtml(q.text)}</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+        <div style="font-size:0.72rem; color:var(--text-dim);">${date}</div>
+        <button onclick="deleteQuestion('${q.id}')" style="background:none; border:none; color:var(--text-dim); font-size:0.78rem; cursor:pointer;" title="Delete">🗑️</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function deleteQuestion(qId) {
+  if (!currentQuestionTopicId) return;
+  const topic = questionsTopics.find(t => t.id === currentQuestionTopicId);
+  if (!topic || !Array.isArray(topic.questions)) return;
+  topic.questions = topic.questions.filter(q => q.id !== qId);
+  topic.updatedAt = new Date().toISOString();
+  saveQuestions();
+  renderQuestionsList();
+}
+
+function deleteCurrentTopic() {
+  if (!currentQuestionTopicId) return;
+  const topic = questionsTopics.find(t => t.id === currentQuestionTopicId);
+  if (!topic) return;
+  if (!confirm(`Delete topic "${topic.title}" and all its ${(topic.questions || []).length} question(s)?`)) return;
+  questionsTopics = questionsTopics.filter(t => t.id !== currentQuestionTopicId);
+  currentQuestionTopicId = null;
+  saveQuestions();
+  showScreen('questions-dashboard');
+  renderQuestionsTopicsList();
+}
+
+async function polishQuestionDraft() {
+  const input = document.getElementById('new-question-input');
+  const original = (input.value || '').trim();
+  if (original.length < 3) { showToast('Type a question first'); return; }
+  const btn = document.getElementById('polish-question-btn');
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '✨ Polishing…';
+  try {
+    const res = await apiFetch('/api/polish-question', { question: original });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const { polished } = await res.json();
+    if (!polished) throw new Error('No polished text returned');
+    input.value = polished;
+    autoGrowChatTextarea(input);
+    // Show the original below so the user can compare / revert.
+    const orig = document.getElementById('polish-question-original');
+    orig.innerHTML = `<span style="font-weight:600;">Original:</span> ${escapeHtml(original)} · <button onclick="revertPolishedQuestion(${JSON.stringify(original).replace(/'/g, "&#39;").replace(/"/g, '&quot;')})" style="background:none; border:none; color:var(--accent2); font-size:0.78rem; cursor:pointer; text-decoration:underline; padding:0;">undo</button>`;
+    orig.style.display = 'block';
+  } catch (err) {
+    showToast('Polish failed: ' + (err.message || 'unknown'));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
+
+function revertPolishedQuestion(original) {
+  const input = document.getElementById('new-question-input');
+  input.value = original;
+  autoGrowChatTextarea(input);
+  document.getElementById('polish-question-original').style.display = 'none';
+}
+
+function renameCurrentTopic() {
+  if (!currentQuestionTopicId) return;
+  const topic = questionsTopics.find(t => t.id === currentQuestionTopicId);
+  if (!topic) return;
+  const newTitle = window.prompt('Rename topic:', topic.title || '');
+  if (newTitle === null) return;
+  const trimmed = newTitle.trim();
+  if (!trimmed) { showToast('Title can\'t be empty'); return; }
+  topic.title = trimmed;
+  topic.updatedAt = new Date().toISOString();
+  saveQuestions();
+  document.getElementById('qt-topic-title').textContent = trimmed;
+}
 
 // ─── Dossier helpers ─────────────────────────────────────────────────────
 
@@ -11994,8 +12873,76 @@ function toggleConceptDrillTag(tag) {
   renderConceptDrillTagPills();
 }
 
+// ─── Concept drill: resume-progress storage ─────────────────────────────
+// Mirrors the vocab "Recent (5/15 days)" resume flow. Keyed per bucket so
+// the 5-day session and 15-day session each remember their own progress.
+// Tag filter is part of the key — switching filters starts a fresh session
+// rather than mixing two different filtered queues.
+const CONCEPT_RECENT_PROGRESS_BASE = 'lexicon-concept-recent-progress';
+
+function conceptRecentProgressKey(bucket, tagFilterArr) {
+  const tagPart = (tagFilterArr || []).slice().sort().join(',');
+  const bucketPart = bucket === 'recent5' ? '5' : '15';
+  return `${CONCEPT_RECENT_PROGRESS_BASE}-${bucketPart}` + (tagPart ? `:${tagPart}` : '');
+}
+
+function getConceptRecentProgress(bucket, tagFilterArr) {
+  try { return JSON.parse(localStorage.getItem(conceptRecentProgressKey(bucket, tagFilterArr))) || null; } catch { return null; }
+}
+
+function saveConceptRecentProgress() {
+  if (conceptDrillTarget !== 'recent' && conceptDrillTarget !== 'recent5') return;
+  const completedIds = conceptReviewQueue.slice(0, conceptReviewIndex).map(c => c.id);
+  const tagArr = [...conceptDrillTagFilter];
+  localStorage.setItem(conceptRecentProgressKey(conceptDrillTarget, tagArr), JSON.stringify({
+    completedIds,
+    total: conceptReviewQueue.length + completedIds.length,
+    tagFilter: tagArr,
+    savedAt: new Date().toISOString()
+  }));
+}
+
+function clearConceptRecentProgress(bucket, tagFilterArr) {
+  localStorage.removeItem(conceptRecentProgressKey(bucket, tagFilterArr));
+}
+
 function startConceptDrill(bucket) {
   document.getElementById('concept-drill-dialog').classList.remove('visible');
+
+  // For recent buckets, check for saved progress (keyed by current tag filter)
+  if (bucket === 'recent' || bucket === 'recent5') {
+    const tagArr = [...conceptDrillTagFilter];
+    const progress = getConceptRecentProgress(bucket, tagArr);
+    if (progress && (progress.completedIds || []).length > 0) {
+      let allInBucket = getConceptsByBucket(bucket);
+      if (conceptDrillTagFilter.size > 0) {
+        const filterSet = new Set(tagArr.map(t => t.toLowerCase()));
+        allInBucket = allInBucket.filter(c => (c.tags || []).some(t => filterSet.has(t.toLowerCase())));
+      }
+      const completedSet = new Set(progress.completedIds);
+      const remaining = allInBucket.filter(c => !completedSet.has(c.id));
+      if (remaining.length > 0) {
+        const d = document.getElementById('concept-recent-progress-dialog');
+        document.getElementById('concept-recent-progress-title').textContent =
+          (bucket === 'recent5' ? 'Recent (5 days)' : 'Recent (15 days)') +
+          (tagArr.length ? ` · ${tagArr.join(', ')}` : '');
+        document.getElementById('concept-recent-progress-info').textContent =
+          `${progress.completedIds.length} of ${allInBucket.length} completed`;
+        document.getElementById('concept-recent-progress-remaining').textContent =
+          `${remaining.length} remaining`;
+        d.dataset.bucket = bucket;
+        d.classList.add('visible');
+        return;
+      } else {
+        clearConceptRecentProgress(bucket, tagArr);
+      }
+    }
+  }
+
+  _doStartConceptDrill(bucket);
+}
+
+function _doStartConceptDrill(bucket) {
   conceptDrillTarget = bucket;
   let queue = getConceptsByBucket(bucket);
   if (conceptDrillTagFilter.size > 0) {
@@ -12015,6 +12962,43 @@ function startConceptDrill(bucket) {
 
   showScreen('concept-review');
   showConceptDrillCard();
+}
+
+function continueConceptRecentProgress() {
+  const d = document.getElementById('concept-recent-progress-dialog');
+  d.classList.remove('visible');
+  const bucket = d.dataset.bucket || 'recent';
+  const tagArr = [...conceptDrillTagFilter];
+  const progress = getConceptRecentProgress(bucket, tagArr);
+  let allInBucket = getConceptsByBucket(bucket);
+  if (conceptDrillTagFilter.size > 0) {
+    const filterSet = new Set(tagArr.map(t => t.toLowerCase()));
+    allInBucket = allInBucket.filter(c => (c.tags || []).some(t => filterSet.has(t.toLowerCase())));
+  }
+  const completedSet = new Set((progress && progress.completedIds) || []);
+  const remaining = allInBucket.filter(c => !completedSet.has(c.id));
+
+  conceptDrillTarget = bucket;
+  conceptReviewQueue = remaining.sort(() => Math.random() - 0.5);
+  conceptReviewIndex = 0;
+
+  if (conceptReviewQueue.length === 0) {
+    showToast('All caught up — starting fresh.');
+    clearConceptRecentProgress(bucket, tagArr);
+    _doStartConceptDrill(bucket);
+    return;
+  }
+
+  showScreen('concept-review');
+  showConceptDrillCard();
+}
+
+function startOverConceptRecent() {
+  const d = document.getElementById('concept-recent-progress-dialog');
+  d.classList.remove('visible');
+  const bucket = d.dataset.bucket || 'recent';
+  clearConceptRecentProgress(bucket, [...conceptDrillTagFilter]);
+  _doStartConceptDrill(bucket);
 }
 
 function showConceptDrillCard() {
@@ -12086,6 +13070,7 @@ function showConceptDrillCard() {
 }
 
 function revealConceptDrill() {
+  buzz('LIGHT');
   document.getElementById('c-drill-reveal').style.display = 'block';
   document.getElementById('c-drill-reveal-btn').style.display = 'none';
   document.getElementById('c-drill-rating').style.display = 'flex';
@@ -12114,6 +13099,9 @@ function onDrillValueChange(_id, value) {
 function rateConceptDrill(quality) {
   const c = conceptReviewQueue[conceptReviewIndex];
   if (!c) return;
+  if (quality <= 1) buzzNotify('ERROR');
+  else if (quality <= 3) buzz('MEDIUM');
+  else buzzNotify('SUCCESS');
 
   // Update SM-2
   const result = sm2(c, quality);
@@ -12131,6 +13119,7 @@ function rateConceptDrill(quality) {
 
   saveConcepts(concepts);
   conceptReviewIndex++;
+  saveConceptRecentProgress();
   showConceptDrillCard();
 }
 
@@ -12139,12 +13128,16 @@ function rateConceptDrill(quality) {
 function skipConceptDrill() {
   if (conceptReviewIndex >= conceptReviewQueue.length) return;
   conceptReviewIndex++;
+  saveConceptRecentProgress();
   showConceptDrillCard();
 }
 
 function endConceptReview() {
   if (conceptReviewIndex >= conceptReviewQueue.length && conceptReviewQueue.length > 0) {
     showToast(`Drill complete! ${conceptReviewQueue.length} concept${conceptReviewQueue.length !== 1 ? 's' : ''} reviewed.`);
+    if (conceptDrillTarget === 'recent' || conceptDrillTarget === 'recent5') {
+      clearConceptRecentProgress(conceptDrillTarget, [...conceptDrillTagFilter]);
+    }
   }
   showScreen('concepts-dashboard');
 }

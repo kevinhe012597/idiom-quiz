@@ -13,3 +13,11 @@ idiom-quiz.db-wal
 # Never commit data exports — they contain personal dossier/concept data
 lexicon-export-*.json
 *.db
+
+# iOS / Capacitor build artifacts
+ios/App/Pods/
+ios/App/build/
+ios/App/App/public/
+ios/DerivedData/
+ios/.swiftpm/
+www/

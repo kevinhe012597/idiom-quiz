@@ -703,6 +703,30 @@ ON CONFLICT(key) DO UPDATE SET
   updated_at = excluded.updated_at
 `);
 
+// ─── Multi-user namespacing ────────────────────────────────────────────────
+// All app_state keys and embedding IDs are scoped by a user-id read from the
+// X-User-Id header. Default 'kevin' for backwards compat with any client that
+// hasn't been upgraded yet (and so the existing data keeps working).
+//
+// Trust model: there's NO real authentication. Anyone who knows another user's
+// id can read their data. This is a "namespacing for one trusted friend" tier,
+// not a security boundary. Real auth (Sign in with Apple/Google) is a follow-up.
+function getUserId(req) {
+  const raw = (req && req.headers && req.headers['x-user-id']) || '';
+  // Sanitize: lowercase a-z 0-9 _ -, max 50 chars. Anything weird → 'kevin'.
+  const cleaned = String(raw).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 50);
+  return cleaned || 'kevin';
+}
+function userKey(userId, key) {
+  return `user:${userId}:${key}`;
+}
+function getState(userId, key) {
+  return selectAppStateStmt.get(userKey(userId, key));
+}
+function setState(userId, key, value) {
+  upsertAppStateStmt.run(userKey(userId, key), value, new Date().toISOString());
+}
+
 // ─── Embeddings table (RAG) ────────────────────────────────────────────────
 // Stores 1536-dim float32 vectors for concept cards, dossier entities, and
 // dossier notes. Used by /api/knowledge-chat to retrieve relevant context.
@@ -736,6 +760,36 @@ const selectAllEmbeddingsByScopeStmt = db.prepare(
   'SELECT id, source_type, source_id, content, embedding FROM embeddings WHERE source_type IN (SELECT value FROM json_each(?))'
 );
 const selectAllExistingEmbIdsStmt = db.prepare('SELECT id, content_hash FROM embeddings');
+// Per-user variants (multi-user namespacing). User-scoped IDs all start with
+// 'user:<id>:' so we can filter via a LIKE prefix match.
+const selectExistingEmbIdsByUserStmt = db.prepare("SELECT id, content_hash FROM embeddings WHERE id LIKE ?");
+
+// One-time migration: any unprefixed legacy app_state keys get attributed to
+// 'kevin'; same for embedding IDs. Idempotent — only runs if the migration
+// flag isn't already set. Runs once on cold start before any endpoints.
+function runMultiUserMigration() {
+  const flagKey = 'migration:multi_user_v1';
+  if (selectAppStateStmt.get(flagKey)) return;
+  const legacyKeys = ['cards', 'concepts', 'dossier_entities', 'scratchpad', 'lookup_usage', 'daily_session', 'daily_completions'];
+  let copied = 0;
+  for (const k of legacyKeys) {
+    const legacy = selectAppStateStmt.get(k);
+    if (!legacy) continue;
+    const target = userKey('kevin', k);
+    if (selectAppStateStmt.get(target)) continue;
+    upsertAppStateStmt.run(target, legacy.value, new Date().toISOString());
+    copied++;
+  }
+  let renamed = 0;
+  try {
+    const stmt = db.prepare("UPDATE embeddings SET id = 'user:kevin:' || id WHERE id NOT LIKE 'user:%'");
+    const result = stmt.run();
+    renamed = result.changes || 0;
+  } catch (e) { console.warn('embedding ID migration failed:', e.message); }
+  upsertAppStateStmt.run(flagKey, JSON.stringify({ ranAt: new Date().toISOString(), copied, renamed }), new Date().toISOString());
+  console.log(`Multi-user migration: copied ${copied} app_state keys, renamed ${renamed} embedding IDs to user:kevin:*`);
+}
+runMultiUserMigration();
 
 // Try to load sqlite-vec extension (optional, falls back to JS cosine).
 let useVecExt = false;
@@ -840,19 +894,22 @@ function buildDossierNoteContent(entity, note) {
   return `${entity.name} · ${date}${src}\n${note.body || ''}`;
 }
 
-// Read concepts + dossier from app_state and return the full set of
-// {id, sourceType, sourceId, content, contentHash} units to be embedded.
-function collectAllRetrievalUnits() {
+// Read concepts + dossier from app_state for a specific user and return the
+// full set of {id, sourceType, sourceId, content, contentHash} units to be
+// embedded. IDs are user-scoped so two users with overlapping content stay
+// isolated.
+function collectAllRetrievalUnits(userId) {
   const units = [];
+  const idPrefix = `user:${userId}:`;
   try {
-    const cRow = selectAppStateStmt.get('concepts');
+    const cRow = getState(userId, 'concepts');
     const concepts = cRow && cRow.value ? JSON.parse(cRow.value) : [];
     for (const c of (Array.isArray(concepts) ? concepts : [])) {
       if (!c || !c.id || c.deleted) continue;
       const content = buildConceptContent(c);
       if (!content || content.trim().length < 3) continue;
       units.push({
-        id: `concept:${c.id}`,
+        id: `${idPrefix}concept:${c.id}`,
         sourceType: 'concept',
         sourceId: c.id,
         content,
@@ -861,14 +918,14 @@ function collectAllRetrievalUnits() {
     }
   } catch (e) { console.warn('collect concepts failed:', e.message); }
   try {
-    const dRow = selectAppStateStmt.get('dossier_entities');
+    const dRow = getState(userId, 'dossier_entities');
     const ents = dRow && dRow.value ? JSON.parse(dRow.value) : [];
     for (const e of (Array.isArray(ents) ? ents : [])) {
       if (!e || !e.id || e.deleted) continue;
       const profileContent = buildDossierEntityContent(e);
       if (profileContent && profileContent.trim().length >= 3) {
         units.push({
-          id: `dossier:${e.id}`,
+          id: `${idPrefix}dossier:${e.id}`,
           sourceType: 'dossier_entity',
           sourceId: e.id,
           content: profileContent,
@@ -879,7 +936,7 @@ function collectAllRetrievalUnits() {
         if (!n || !n.id || !n.body || n.body.trim().length < 3) continue;
         const noteContent = buildDossierNoteContent(e, n);
         units.push({
-          id: `note:${e.id}/${n.id}`,
+          id: `${idPrefix}note:${e.id}/${n.id}`,
           sourceType: 'dossier_note',
           sourceId: `${e.id}/${n.id}`,
           content: noteContent,
@@ -891,19 +948,21 @@ function collectAllRetrievalUnits() {
   return units;
 }
 
-// Idempotent backfill: walks all retrieval units, embeds anything new or
-// content-changed (skips unchanged via content_hash), drops stale rows.
-let backfillInFlight = false;
-async function runEmbedBackfill() {
-  if (backfillInFlight) return { skipped: true, reason: 'already running' };
-  backfillInFlight = true;
+// Idempotent backfill (per user): walks all retrieval units for the user,
+// embeds anything new or content-changed (skips unchanged via content_hash),
+// drops stale rows. Only deletes rows that belong to THIS user (id starts
+// with 'user:<userId>:') so other users' data is never touched.
+const backfillInFlight = new Set();
+async function runEmbedBackfill(userId) {
+  if (backfillInFlight.has(userId)) return { skipped: true, reason: 'already running' };
+  backfillInFlight.add(userId);
   const t0 = Date.now();
   try {
-    const units = collectAllRetrievalUnits();
+    const units = collectAllRetrievalUnits(userId);
     const liveIds = new Set(units.map(u => u.id));
-    // Fetch current embeddings map
+    // Fetch current embeddings for THIS user only
     const existing = new Map();
-    for (const row of selectAllExistingEmbIdsStmt.all()) {
+    for (const row of selectExistingEmbIdsByUserStmt.all(`user:${userId}:%`)) {
       existing.set(row.id, row.content_hash);
     }
     // Determine deltas
@@ -938,54 +997,66 @@ async function runEmbedBackfill() {
     }
     const elapsed = Date.now() - t0;
     if (embedded || deleted) {
-      console.log(`Embed backfill: embedded=${embedded} deleted=${deleted} skipped=${units.length - embedded} (${elapsed}ms)`);
+      console.log(`Embed backfill (${userId}): embedded=${embedded} deleted=${deleted} skipped=${units.length - embedded} (${elapsed}ms)`);
     }
     return { embedded, deleted, totalLive: units.length, elapsedMs: elapsed };
   } finally {
-    backfillInFlight = false;
+    backfillInFlight.delete(userId);
   }
 }
 
-// Debounced trigger — used after PUT /api/concepts and PUT /api/dossier so
-// rapid sync calls don't hammer the embeddings API.
-let backfillDebounceTimer = null;
-function scheduleEmbedBackfill(delayMs = 2000) {
-  if (backfillDebounceTimer) clearTimeout(backfillDebounceTimer);
-  backfillDebounceTimer = setTimeout(() => {
-    backfillDebounceTimer = null;
-    runEmbedBackfill().catch(e => console.warn('Backfill error:', e.message));
+// Debounced per-user trigger — used after PUT /api/concepts and PUT /api/dossier
+// so rapid sync calls don't hammer the embeddings API.
+const backfillDebounceTimers = new Map();
+function scheduleEmbedBackfill(userId, delayMs = 2000) {
+  const prev = backfillDebounceTimers.get(userId);
+  if (prev) clearTimeout(prev);
+  const t = setTimeout(() => {
+    backfillDebounceTimers.delete(userId);
+    runEmbedBackfill(userId).catch(e => console.warn('Backfill error:', e.message));
   }, delayMs);
+  backfillDebounceTimers.set(userId, t);
 }
 
-// Run an initial backfill 10s after cold start (gives the server time to
-// stabilize, doesn't block boot).
+// Run an initial backfill for kevin 10s after cold start (gives the server
+// time to stabilize, doesn't block boot). Other users get their first
+// backfill on their first PUT.
 setTimeout(() => {
-  runEmbedBackfill().catch(e => console.warn('Initial backfill error:', e.message));
+  runEmbedBackfill('kevin').catch(e => console.warn('Initial backfill error:', e.message));
 }, 10000);
 
 // k-nearest-neighbor search over embeddings.
 // Returns top-k rows: [{ id, source_type, source_id, content, score }].
 // Uses sqlite-vec if loaded; falls back to JS cosine over BLOB rows.
-function knnSearch(queryVec, scopeTypes, k = 12) {
+function knnSearch(queryVec, scopeTypes, k = 12, userId = 'kevin') {
   const types = (scopeTypes && scopeTypes.length) ? scopeTypes : ['concept', 'dossier_entity', 'dossier_note'];
+  const userPrefix = `user:${userId}:%`;
   if (useVecExt) {
     try {
-      // sqlite-vec exposes vec_distance_cosine for raw BLOB embeddings
+      // sqlite-vec exposes vec_distance_cosine for raw BLOB embeddings.
+      // Filter by id LIKE so only THIS user's vectors are scored.
       const placeholders = types.map(() => '?').join(',');
       const rows = db.prepare(
         `SELECT id, source_type, source_id, content,
                 vec_distance_cosine(embedding, ?) AS dist
            FROM embeddings
           WHERE source_type IN (${placeholders})
+            AND id LIKE ?
           ORDER BY dist ASC LIMIT ?`
-      ).all(float32ToBlob(queryVec), ...types, k);
+      ).all(float32ToBlob(queryVec), ...types, userPrefix, k);
       return rows.map(r => ({ ...r, score: 1 - r.dist }));
     } catch (e) {
       console.warn('vec_distance_cosine failed, falling back to JS:', e.message);
     }
   }
-  // JS cosine fallback
-  const all = selectAllEmbeddingsByScopeStmt.all(JSON.stringify(types));
+  // JS cosine fallback — load all rows for the user/types and score in JS.
+  const placeholders = types.map(() => '?').join(',');
+  const all = db.prepare(
+    `SELECT id, source_type, source_id, content, embedding
+       FROM embeddings
+      WHERE source_type IN (${placeholders})
+        AND id LIKE ?`
+  ).all(...types, userPrefix);
   const scored = [];
   for (const row of all) {
     const v = blobToFloat32(row.embedding);
@@ -1069,11 +1140,13 @@ const server = http.createServer(async (req, res) => {
   // weekly for a manual safety net under your control.
   if (req.method === 'GET' && req.url.startsWith('/api/export-all')) {
     try {
-      const cardsRow = (() => { try { const r = selectAppStateStmt.get('cards'); return r && r.value ? JSON.parse(r.value) : []; } catch { return []; } })();
-      const concepts = (() => { try { const r = selectAppStateStmt.get('concepts'); return r && r.value ? JSON.parse(r.value) : []; } catch { return []; } })();
-      const dossier = (() => { try { const r = selectAppStateStmt.get('dossier_entities'); return r && r.value ? JSON.parse(r.value) : []; } catch { return []; } })();
-      const scratchpad = (() => { try { const r = selectAppStateStmt.get('scratchpad'); return r && r.value ? r.value : ''; } catch { return ''; } })();
-      const lookupUsage = (() => { try { const r = selectAppStateStmt.get('lookup_usage'); return r && r.value ? JSON.parse(r.value) : {}; } catch { return {}; } })();
+      const userId = getUserId(req);
+      const cardsRow = (() => { try { const r = getState(userId, 'cards'); return r && r.value ? JSON.parse(r.value) : []; } catch { return []; } })();
+      const concepts = (() => { try { const r = getState(userId, 'concepts'); return r && r.value ? JSON.parse(r.value) : []; } catch { return []; } })();
+      const dossier = (() => { try { const r = getState(userId, 'dossier_entities'); return r && r.value ? JSON.parse(r.value) : []; } catch { return []; } })();
+      const scratchpad = (() => { try { const r = getState(userId, 'scratchpad'); return r && r.value ? r.value : ''; } catch { return ''; } })();
+      const lookupUsage = (() => { try { const r = getState(userId, 'lookup_usage'); return r && r.value ? JSON.parse(r.value) : {}; } catch { return {}; } })();
+      const questionsTopics = (() => { try { const r = getState(userId, 'questions_topics'); return r && r.value ? JSON.parse(r.value) : []; } catch { return []; } })();
       const out = {
         exportedAt: new Date().toISOString(),
         version: 1,
@@ -1082,6 +1155,7 @@ const server = http.createServer(async (req, res) => {
         dossier_entities: dossier,
         scratchpad,
         lookup_usage: lookupUsage,
+        questions_topics: questionsTopics,
       };
       const filename = `lexicon-export-${new Date().toISOString().slice(0, 10)}.json`;
       res.writeHead(200, {
@@ -1107,7 +1181,8 @@ const server = http.createServer(async (req, res) => {
   // ─── Concepts storage (SQLite) ─────────────────────────────────────────
   if (req.method === 'GET' && req.url === '/api/concepts') {
     try {
-      const row = selectAppStateStmt.get('concepts');
+      const userId = getUserId(req);
+      const row = getState(userId, 'concepts');
       const concepts = row && row.value ? JSON.parse(row.value) : [];
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ concepts: Array.isArray(concepts) ? concepts : [] }));
@@ -1120,6 +1195,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'PUT' && req.url === '/api/concepts') {
+    const userId = getUserId(req);
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
@@ -1133,10 +1209,10 @@ const server = http.createServer(async (req, res) => {
         const concepts = parsed.concepts
           .filter(c => c && typeof c === 'object' && typeof c.title === 'string' && c.title.trim().length > 0)
           .map(c => ({ ...c, title: c.title.trim() }));
-        upsertAppStateStmt.run('concepts', JSON.stringify(concepts), new Date().toISOString());
+        setState(userId, 'concepts', JSON.stringify(concepts));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, count: concepts.length }));
-        scheduleEmbedBackfill(); // refresh vector index in the background
+        scheduleEmbedBackfill(userId); // refresh vector index in the background
       } catch (err) {
         console.error('Save concepts error:', err.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1151,7 +1227,8 @@ const server = http.createServer(async (req, res) => {
   // { id, type, name, categories, notes, ... }. Same persistence pattern as concepts.
   if (req.method === 'GET' && req.url === '/api/dossier') {
     try {
-      const row = selectAppStateStmt.get('dossier_entities');
+      const userId = getUserId(req);
+      const row = getState(userId, 'dossier_entities');
       const entities = row && row.value ? JSON.parse(row.value) : [];
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ entities: Array.isArray(entities) ? entities : [] }));
@@ -1164,6 +1241,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'PUT' && req.url === '/api/dossier') {
+    const userId = getUserId(req);
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
@@ -1177,12 +1255,64 @@ const server = http.createServer(async (req, res) => {
         const entities = parsed.entities
           .filter(e => e && typeof e === 'object' && typeof e.name === 'string' && e.name.trim().length > 0)
           .map(e => ({ ...e, name: e.name.trim() }));
-        upsertAppStateStmt.run('dossier_entities', JSON.stringify(entities), new Date().toISOString());
+        setState(userId, 'dossier_entities', JSON.stringify(entities));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, count: entities.length }));
-        scheduleEmbedBackfill(); // refresh vector index in the background
+        scheduleEmbedBackfill(userId); // refresh vector index in the background
       } catch (err) {
         console.error('Save dossier error:', err.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // ─── Questions storage (notepad: topics → questions) ────────────────────
+  // Stored as the single 'questions_topics' key in app_state. Each topic is
+  // { id, title, createdAt, updatedAt, questions: [{id, text, createdAt}] }.
+  // No embeddings — this is a plain notepad, not part of the RAG corpus.
+  if (req.method === 'GET' && req.url === '/api/questions') {
+    try {
+      const userId = getUserId(req);
+      const row = getState(userId, 'questions_topics');
+      const topics = row && row.value ? JSON.parse(row.value) : [];
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ topics: Array.isArray(topics) ? topics : [] }));
+    } catch (err) {
+      console.error('Load questions error:', err.message);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (req.method === 'PUT' && req.url === '/api/questions') {
+    const userId = getUserId(req);
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > 5 * 1024 * 1024) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const parsed = JSON.parse(body || '{}');
+        if (!Array.isArray(parsed.topics)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing required field: topics (array)' }));
+          return;
+        }
+        const topics = parsed.topics
+          .filter(t => t && typeof t === 'object' && typeof t.title === 'string' && t.title.trim().length > 0 && typeof t.id === 'string')
+          .map(t => ({
+            ...t,
+            title: t.title.trim(),
+            questions: Array.isArray(t.questions)
+              ? t.questions.filter(q => q && typeof q === 'object' && typeof q.id === 'string' && typeof q.text === 'string')
+              : [],
+          }));
+        setState(userId, 'questions_topics', JSON.stringify(topics));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, count: topics.length }));
+      } catch (err) {
+        console.error('Save questions error:', err.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
@@ -1196,7 +1326,8 @@ const server = http.createServer(async (req, res) => {
   // manual triggers and for status reporting.
   if (req.method === 'POST' && req.url === '/api/embed-backfill') {
     try {
-      const result = await runEmbedBackfill();
+      const userId = getUserId(req);
+      const result = await runEmbedBackfill(userId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ...result, useVecExt }));
     } catch (err) {
@@ -1216,6 +1347,7 @@ const server = http.createServer(async (req, res) => {
   // into Sonnet's context. Always reflects the latest content (doesn't
   // depend on embeddings being indexed).
   if (req.method === 'POST' && req.url === '/api/library-chat') {
+    const userId = getUserId(req);
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
@@ -1233,7 +1365,7 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         // Load cards for this Library source from app_state
-        const cRow = selectAppStateStmt.get('concepts');
+        const cRow = getState(userId, 'concepts');
         const concepts = cRow && cRow.value ? JSON.parse(cRow.value) : [];
         const sourceTrim = source.trim();
         const cards = (concepts || []).filter(c =>
@@ -1330,6 +1462,7 @@ ${ctxBlocks}`;
   }
 
   if (req.method === 'POST' && req.url === '/api/knowledge-chat') {
+    const userId = getUserId(req);
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
@@ -1373,12 +1506,12 @@ ${ctxBlocks}`;
           return;
         }
 
-        // 2. KNN search
-        let results = knnSearch(qVec, scopeTypes, topK);
+        // 2. KNN search — scoped to this user only via id prefix
+        let results = knnSearch(qVec, scopeTypes, topK, userId);
 
         // 3. Apply 'library' scope filter (concepts with bucket==='library')
         if (scope === 'library') {
-          const cRow = selectAppStateStmt.get('concepts');
+          const cRow = getState(userId, 'concepts');
           const concepts = cRow && cRow.value ? JSON.parse(cRow.value) : [];
           const libraryIds = new Set((concepts || []).filter(c => c.bucket === 'library').map(c => c.id));
           results = results.filter(r => r.source_type === 'concept' && libraryIds.has(r.source_id));
@@ -1394,10 +1527,10 @@ ${ctxBlocks}`;
         }
 
         // 4. Hydrate titles for citations and build context block
-        const cRow = selectAppStateStmt.get('concepts');
+        const cRow = getState(userId, 'concepts');
         const concepts = cRow && cRow.value ? JSON.parse(cRow.value) : [];
         const conceptById = new Map((concepts || []).map(c => [c.id, c]));
-        const dRow = selectAppStateStmt.get('dossier_entities');
+        const dRow = getState(userId, 'dossier_entities');
         const ents = dRow && dRow.value ? JSON.parse(dRow.value) : [];
         const entityById = new Map((ents || []).map(e => [e.id, e]));
 
@@ -1496,7 +1629,8 @@ ${ctxBlocks}`;
   // ─── Scratchpad (single string) ──────────────────────────────────────────
   if (req.method === 'GET' && req.url === '/api/scratchpad') {
     try {
-      const row = selectAppStateStmt.get('scratchpad');
+      const userId = getUserId(req);
+      const row = getState(userId, 'scratchpad');
       const text = row && row.value ? row.value : '';
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ text }));
@@ -1508,13 +1642,14 @@ ${ctxBlocks}`;
   }
 
   if (req.method === 'PUT' && req.url === '/api/scratchpad') {
+    const userId = getUserId(req);
     let body = '';
     req.on('data', chunk => { body += chunk; if (body.length > 5 * 1024 * 1024) req.destroy(); });
     req.on('end', () => {
       try {
         const parsed = JSON.parse(body || '{}');
         const text = typeof parsed.text === 'string' ? parsed.text : '';
-        upsertAppStateStmt.run('scratchpad', text, new Date().toISOString());
+        setState(userId, 'scratchpad', text);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
       } catch (err) {
@@ -1528,7 +1663,8 @@ ${ctxBlocks}`;
   // ─── Lookup usage counters (object of key→count) ─────────────────────────
   if (req.method === 'GET' && req.url === '/api/lookup-usage') {
     try {
-      const row = selectAppStateStmt.get('lookup_usage');
+      const userId = getUserId(req);
+      const row = getState(userId, 'lookup_usage');
       const usage = row && row.value ? JSON.parse(row.value) : {};
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ usage: typeof usage === 'object' && usage !== null ? usage : {} }));
@@ -1540,13 +1676,14 @@ ${ctxBlocks}`;
   }
 
   if (req.method === 'PUT' && req.url === '/api/lookup-usage') {
+    const userId = getUserId(req);
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
       try {
         const parsed = JSON.parse(body || '{}');
         const usage = parsed.usage && typeof parsed.usage === 'object' ? parsed.usage : {};
-        upsertAppStateStmt.run('lookup_usage', JSON.stringify(usage), new Date().toISOString());
+        setState(userId, 'lookup_usage', JSON.stringify(usage));
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
       } catch (err) {
@@ -2591,6 +2728,103 @@ ${existingTagsBlock(existingTags)}`;
     return;
   }
 
+  // ─── Polish a rough question (for the Questions module) ─────────────────
+  // Takes a half-formed question and returns a sharper version. Preserves the
+  // user's intent — does NOT answer the question, does NOT add facts. Just
+  // tightens phrasing.
+  if (req.method === 'POST' && req.url === '/api/polish-question') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const _body = JSON.parse(body || '{}');
+        const { question } = _body;
+        if (!question || typeof question !== 'string' || question.trim().length < 3) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing or too-short question' }));
+          return;
+        }
+
+        const usedModel = pickAnthropicModel(_body);
+        const polishTool = {
+          name: 'save_polished_question',
+          description: 'Return the polished version of the user\'s question.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              polished: { type: 'string', description: 'The polished question. Same intent, tighter wording, ends with "?" if interrogative. Single sentence unless the original genuinely needs multiple. Do NOT answer the question. Do NOT add new facts or assumptions.' },
+            },
+            required: ['polished'],
+          },
+        };
+
+        const systemPrompt = `You polish rough questions into clear, well-formed ones.
+
+CRITICAL RULES:
+- Preserve the user's intent exactly. Do NOT answer the question.
+- Do NOT add new facts, assumptions, or context they didn't write.
+- Tighten phrasing: remove filler words, fix grammar, make it specific where vagueness hurts comprehension.
+- Keep the user's voice — don't make casual questions sound academic.
+- Single sentence preferred. End with "?" if interrogative; statement-style "questions" (e.g. "what makes X work") can stay as-is.
+- If the original is already clean, return it nearly unchanged.`;
+
+        const anthropicPayload = JSON.stringify({
+          model: usedModel,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: `Polish this question:\n\n"${question.trim()}"` }],
+          max_tokens: 400,
+          tools: [polishTool],
+          tool_choice: { type: 'tool', name: 'save_polished_question' },
+        });
+
+        const httpsLib = require('https');
+        const apiReq = httpsLib.request({
+          hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'Content-Length': Buffer.byteLength(anthropicPayload),
+          },
+        }, (apiRes) => {
+          let data = '';
+          apiRes.on('data', chunk => { data += chunk; });
+          apiRes.on('end', () => {
+            if (apiRes.statusCode !== 200) {
+              console.error('polish-question Anthropic error:', apiRes.statusCode, data.slice(0, 300));
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `Polish failed (HTTP ${apiRes.statusCode})` }));
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const toolUse = (parsed.content || []).find(b => b.type === 'tool_use' && b.name === 'save_polished_question');
+              if (!toolUse || !toolUse.input || typeof toolUse.input.polished !== 'string') {
+                throw new Error('No tool_use in response');
+              }
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ polished: toolUse.input.polished.trim(), model: usedModel }));
+            } catch (e) {
+              console.error('polish-question parse error:', e.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to parse response' }));
+            }
+          });
+        });
+        apiReq.on('error', (err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        apiReq.write(anthropicPayload);
+        apiReq.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/fetch-article') {
     let body = '';
     req.on('data', c => { body += c; });
@@ -3256,7 +3490,8 @@ ${existingTagsBlock(existingTags)}`;
   // Persistent deck storage (SQLite)
   if (req.method === 'GET' && req.url === '/api/cards') {
     try {
-      const cards = loadCardsFromDb();
+      const userId = getUserId(req);
+      const cards = loadCardsFromDb(userId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ cards }));
     } catch (err) {
@@ -3268,6 +3503,7 @@ ${existingTagsBlock(existingTags)}`;
   }
 
   if (req.method === 'PUT' && req.url === '/api/cards') {
+    const userId = getUserId(req);
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', () => {
@@ -3280,7 +3516,7 @@ ${existingTagsBlock(existingTags)}`;
         }
 
         const cards = sanitizeCards(parsed.cards);
-        saveCardsToDb(cards);
+        saveCardsToDb(userId, cards);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, count: cards.length }));
@@ -3295,9 +3531,10 @@ ${existingTagsBlock(existingTags)}`;
 
   // Daily session sync (GET / PUT)
   if (req.url === '/api/daily-session') {
+    const userId = getUserId(req);
     if (req.method === 'GET') {
       try {
-        const row = selectAppStateStmt.get('daily_session');
+        const row = getState(userId, 'daily_session');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(row ? row.value : 'null');
       } catch (err) {
@@ -3312,7 +3549,7 @@ ${existingTagsBlock(existingTags)}`;
       req.on('end', () => {
         try {
           const session = JSON.parse(body || 'null');
-          upsertAppStateStmt.run('daily_session', JSON.stringify(session), new Date().toISOString());
+          setState(userId, 'daily_session', JSON.stringify(session));
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true }));
         } catch (err) {
@@ -3326,9 +3563,10 @@ ${existingTagsBlock(existingTags)}`;
 
   // Daily completions sync (GET / PUT)
   if (req.url === '/api/daily-completions') {
+    const userId = getUserId(req);
     if (req.method === 'GET') {
       try {
-        const row = selectAppStateStmt.get('daily_completions');
+        const row = getState(userId, 'daily_completions');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(row ? row.value : '[]');
       } catch (err) {
@@ -3343,7 +3581,7 @@ ${existingTagsBlock(existingTags)}`;
       req.on('end', () => {
         try {
           const completions = JSON.parse(body || '[]');
-          upsertAppStateStmt.run('daily_completions', JSON.stringify(completions), new Date().toISOString());
+          setState(userId, 'daily_completions', JSON.stringify(completions));
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true }));
         } catch (err) {
@@ -4019,14 +4257,18 @@ Return JSON: {"note":"optional note","groups":[{"label":"Group Name","items":[{"
     req.on('end', async () => {
       try {
         const _body = JSON.parse(body);
-        const { text, meaning } = _body;
+        const { text, meaning, constraint } = _body;
         if (!text && !meaning) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing text or meaning' }));
           return;
         }
 
-        const userMessage = [text && `Sentence: ${text}`, meaning && `Meaning: ${meaning}`].filter(Boolean).join('\n');
+        const userMessage = [
+          text && `Sentence: ${text}`,
+          meaning && `Meaning: ${meaning}`,
+          constraint && `Constraint (the suggested word/phrase MUST satisfy this): ${constraint}`,
+        ].filter(Boolean).join('\n');
 
         const payload = JSON.stringify({
           model: pickModel(_body),
@@ -4039,9 +4281,11 @@ CRITICAL: The user marks the gap with one of these placeholders: "..." (three do
 
 If no placeholder is present, treat the end of the sentence as the gap (or wherever the meaning indicates).
 
+If a "Constraint:" line is provided (e.g. "must start with the letter 'p'", "must be an idiom", "must be 1-2 words"), every candidate you return MUST satisfy it. If you cannot find a candidate that satisfies the constraint, return your closest attempts with a brief note in their meaning explaining the constraint conflict.
+
 1. Identify the gap and pick the most likely word/phrase/idiom that fills it.
 2. Build the "completedSentence" by replacing the placeholder with the chosen phrase — keep all other words exactly as the user wrote them.
-3. Suggest 1-3 candidate phrases (each must independently fit the slot). Provide each one's meaning and a brief example.
+3. Suggest 1-3 candidate phrases (each must independently fit the slot AND satisfy any constraint). Provide each one's meaning and a brief example.
 
 Return JSON:
 {
@@ -5137,8 +5381,8 @@ Only output valid JSON, nothing else.`
   });
 }
 
-function loadCardsFromDb() {
-  const row = selectAppStateStmt.get('cards');
+function loadCardsFromDb(userId) {
+  const row = getState(userId, 'cards');
   if (!row || !row.value) return [];
 
   const parsed = JSON.parse(row.value);
@@ -5153,8 +5397,8 @@ function sanitizeCards(cards) {
     .map(card => ({ ...card, phrase: card.phrase.trim() }));
 }
 
-function saveCardsToDb(cards) {
-  upsertAppStateStmt.run('cards', JSON.stringify(cards), new Date().toISOString());
+function saveCardsToDb(userId, cards) {
+  setState(userId, 'cards', JSON.stringify(cards));
 }
 
 async function enrichBatch(phrases, model) {

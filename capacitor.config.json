@@ -1,0 +1,9 @@
+{
+  "appId": "com.kevinhe.lexicon",
+  "appName": "Lexicon",
+  "webDir": "www",
+  "server": {
+    "url": "https://lexicon.up.railway.app",
+    "cleartext": false
+  }
+}
