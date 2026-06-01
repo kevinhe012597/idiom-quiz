@@ -3609,12 +3609,17 @@ function getCurrentUserId() {
   if (IS_DEMO_SESSION) return 'demo';
   let id = localStorage.getItem(USER_ID_KEY);
   if (id) return id;
-  // No saved id yet → default to 'kevin' immediately. We do NOT call
-  // window.prompt() at module-load time — in iOS WKWebView (Capacitor),
-  // synchronous prompt() can block the JS thread before the page has
-  // rendered, leaving a white screen. Friends can change their username
-  // via the Settings UI later (Dashboard → Settings → Username).
-  id = 'kevin';
+  // No saved id yet → mint a random per-visitor ID so a stranger landing on
+  // the bare URL doesn't end up in someone else's account. Existing users
+  // (my browsers, my iPhone) already have their id in localStorage, so they
+  // are unaffected by this change.
+  //
+  // We do NOT call window.prompt() at module-load time — in iOS WKWebView
+  // (Capacitor), synchronous prompt() can block the JS thread before the
+  // page has rendered, leaving a white screen. The fresh visitor lands on
+  // an empty deck under their random id and can use the app normally.
+  const rand = (Date.now().toString(36) + Math.random().toString(36).slice(2, 10)).slice(-12);
+  id = `u-${rand}`;
   localStorage.setItem(USER_ID_KEY, id);
   return id;
 }

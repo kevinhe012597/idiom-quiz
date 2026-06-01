@@ -2,8 +2,7 @@
 
 > A personal knowledge tool that learns alongside you. Vocabulary drills, concept flashcards, a people CRM, and a notepad — all queryable by AI.
 
-**Live demo (reviewers, peers):** https://lexicon.up.railway.app/?demo=1
-**Live (production, my personal instance):** https://lexicon.up.railway.app
+**Live demo:** https://lexicon.up.railway.app/?demo=1
 **Repo:** https://github.com/kevinhe012597/lexicon
 **Stanford CS 153 — Spring 2026 — by Kevin He**
 
@@ -23,7 +22,7 @@
 
 The demo is sandbox-only: data lives under demo-scoped localStorage and a `demo` user ID on the server, fully isolated from any other user. Server enforces this — even hand-crafted requests can't escape demo mode into other users' data.
 
-For **personal use** (production), open `https://lexicon.up.railway.app/` (no query). The app prompts for a unique username on first launch; data stays scoped to that name. There's no real auth (yet); see [Known limitations](#known-limitations) below.
+The same codebase is also deployed for my personal daily use under a separate user ID; that instance is not publicly linked. The app is single-tenant per user-ID; there's no real auth (yet); see [Known limitations](#known-limitations) below.
 
 ---
 
