@@ -4,7 +4,7 @@
 
 **Live demo (reviewers, peers):** https://lexicon.up.railway.app/?demo=1
 **Live (production, my personal instance):** https://lexicon.up.railway.app
-**Repo:** https://github.com/kevinhe012597/idiom-quiz
+**Repo:** https://github.com/kevinhe012597/lexicon
 **Stanford CS 153 — Spring 2026 — by Kevin He**
 
 ---
@@ -125,8 +125,8 @@ The hypothesis: a tool you actually use for ten things will retain you better th
 Requires **Node 22+** and (optionally) an Apple Developer environment for the iOS shell.
 
 ```bash
-git clone https://github.com/kevinhe012597/idiom-quiz.git
-cd idiom-quiz
+git clone https://github.com/kevinhe012597/lexicon.git
+cd lexicon
 npm install
 ```
 
