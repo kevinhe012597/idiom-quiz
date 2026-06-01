@@ -711,7 +711,19 @@ ON CONFLICT(key) DO UPDATE SET
 // Trust model: there's NO real authentication. Anyone who knows another user's
 // id can read their data. This is a "namespacing for one trusted friend" tier,
 // not a security boundary. Real auth (Sign in with Apple/Google) is a follow-up.
+//
+// EXCEPTION: when the client sends X-Demo-Session: 1, force userId='demo'.
+// The client sets this header once the user has entered demo mode via
+// `?demo=1` in the URL. This is the bulletproof side of the demo isolation —
+// a hand-crafted curl with X-User-Id:kevin BUT X-Demo-Session:1 still resolves
+// to the demo user. The user-id header is ignored entirely in demo mode.
+function isDemoSession(req) {
+  if (!req || !req.headers) return false;
+  const flag = req.headers['x-demo-session'];
+  return flag === '1' || flag === 'true';
+}
 function getUserId(req) {
+  if (isDemoSession(req)) return 'demo';
   const raw = (req && req.headers && req.headers['x-user-id']) || '';
   // Sanitize: lowercase a-z 0-9 _ -, max 50 chars. Anything weird → 'kevin'.
   const cleaned = String(raw).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 50);
@@ -790,6 +802,132 @@ function runMultiUserMigration() {
   console.log(`Multi-user migration: copied ${copied} app_state keys, renamed ${renamed} embedding IDs to user:kevin:*`);
 }
 runMultiUserMigration();
+
+// ─── Demo user seed data ────────────────────────────────────────────────────
+// Pre-populates user='demo' with a handful of representative cards/concepts/
+// dossier entries so reviewers can see what a populated app looks like
+// without having to add data themselves. Idempotent — only seeds if the
+// 'cards' key for the demo user is missing or empty.
+function seedDemoUser() {
+  const userId = 'demo';
+  const now = new Date().toISOString();
+  const today = now.slice(0, 10);
+  const gid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+  const existing = getState(userId, 'cards');
+  const existingCards = existing && existing.value ? JSON.parse(existing.value) : [];
+  if (existingCards.length > 0) {
+    return { skipped: true, reason: 'demo user already has cards' };
+  }
+
+  const cards = [
+    { phrase: 'gaslight',  category: 'word',   meaning: 'To manipulate someone into questioning their own perception of reality.', example: 'He kept telling her she was imagining things — classic gaslighting.' },
+    { phrase: 'palpable',  category: 'word',   meaning: 'So intense it can almost be physically felt.', example: 'The tension in the room was palpable.' },
+    { phrase: 'bite the bullet', category: 'idiom', meaning: 'To force yourself to do something unpleasant that you have been avoiding.', example: 'I had to bite the bullet and tell my boss I was leaving.' },
+    { phrase: 'red herring', category: 'idiom', meaning: 'A clue or piece of information that is intended to be misleading or distracting.', example: 'The detective realized the suspicious phone call was a red herring.' },
+    { phrase: 'serendipity', category: 'word', meaning: 'The occurrence of finding pleasant things by chance.', example: 'Meeting my cofounder at that coffee shop was pure serendipity.' },
+    { phrase: 'ostensibly', category: 'word',  meaning: 'Apparently or seemingly (often suggesting it is not in fact the case).', example: 'He moved to Tokyo ostensibly for work, but really to chase a girlfriend.' },
+    { phrase: 'cut to the chase', category: 'idiom', meaning: 'To get to the point without wasting time.', example: 'Let me cut to the chase — we are going to miss the deadline.' },
+    { phrase: 'sanguine', category: 'word', meaning: 'Optimistic or positive, especially in an apparently bad situation.', example: 'She remained sanguine about her chances despite the polls.' },
+  ].map(c => ({
+    id: gid(), phrase: c.phrase, meaning: c.meaning, example: c.example, category: c.category,
+    bucket: undefined, createdAt: now, source: 'Demo seed',
+    easeFactor: 2.5, interval: 0, repetitions: 0,
+    nextReview: today, lastReview: null,
+  }));
+  setState(userId, 'cards', JSON.stringify(cards));
+
+  const concepts = [
+    {
+      id: gid(), title: 'Spaced Repetition: Why Active Recall + Forgetting Curve Beats Cramming',
+      points: [
+        "TL;DR: You remember best when you're forced to recall an item just as you're about to forget it — review schedules that exploit this beat cramming by 5–10x.",
+        'The forgetting curve (Ebbinghaus, 1885) shows memory decays exponentially: 50% lost within an hour without reinforcement.',
+        'Active recall (testing yourself) creates stronger memory traces than passive re-reading because the retrieval act itself strengthens the synapse.',
+        'Anki implements the SM-2 algorithm: easier cards get longer intervals (up to years), harder cards loop back faster. Lexicon uses the same algorithm.',
+        'Critique: works for facts and vocab, less clearly for conceptual understanding or skill acquisition.',
+      ],
+      tags: ['Learning', 'Memory'],
+      createdAt: now, bucket: 'nailed',
+      easeFactor: 2.5, interval: 4, repetitions: 2, nextReview: today, lastReview: today,
+    },
+    {
+      id: gid(), title: 'RAG (Retrieval-Augmented Generation): Vector Search + LLM = Cheap "Chat with Your Docs"',
+      points: [
+        "TL;DR: RAG is the 'fetch then summarize' pattern — embed your docs, KNN-search the user's question, stuff top-k chunks into the LLM context, generate.",
+        'Embeddings = a 1536-dim vector that captures the semantic meaning of a piece of text. OpenAI text-embedding-3-small is the cheap default ($0.02/M tokens).',
+        'Vector DBs (Pinecone, Weaviate) are overkill for <1M vectors. sqlite-vec extension lets you do KNN inside SQLite.',
+        'Citations: have the model surface which chunks it drew from so users can verify and click through to source.',
+        'Where it fails: needs frequent re-embedding when content changes; bad chunking destroys retrieval quality; not a substitute for fine-tuning when the model lacks the underlying knowledge.',
+      ],
+      tags: ['AI', 'Architecture'],
+      createdAt: now, bucket: 'kinda',
+      easeFactor: 2.5, interval: 0, repetitions: 0, nextReview: today, lastReview: null,
+    },
+    {
+      id: gid(), title: 'PWAs vs Native Apps: When the Hybrid Trade-Off Actually Wins',
+      points: [
+        "TL;DR: PWAs give you ~85% of native at ~15% of the build effort — but iOS Safari's restrictions (no push, evicted storage, no background sync) push most teams to wrap with Capacitor or rewrite native.",
+        'PWA pros: one codebase, instant updates, no app store review, works offline via service worker.',
+        'PWA cons on iOS specifically: localStorage evicted after 7 days of inactivity, no real Web Push, Add-to-Home-Screen UX is buried.',
+        'Capacitor/Cordova/Tauri: wrap a webview in a native shell. Get the native APIs (haptics, notifications, biometrics) without rewriting the UI in Swift.',
+        'Counterargument: serious consumer apps still go native for animation polish and performance. PWAs are great for productivity tools, weak for games and creative software.',
+      ],
+      tags: ['Mobile', 'Architecture'],
+      createdAt: now, bucket: 'nope',
+      easeFactor: 2.5, interval: 0, repetitions: 0, nextReview: today, lastReview: null,
+    },
+  ];
+  setState(userId, 'concepts', JSON.stringify(concepts));
+
+  const dossier = [
+    {
+      id: gid(), type: 'person', name: 'Henry Gao',
+      role: 'Founder', firm: 'General Matter', location: 'SF',
+      categories: ['AI Infra'], howIMet: 'GSB 2024',
+      notes: [
+        { id: gid(), date: '2026-04-12', body: "Lunch at Tartine. Henry's looking hard at AI infra plays — specifically the chip-power-nuclear-enrichment chain. Says the bottleneck is now uranium enrichment in the US since Germany shut down their reactors. Wants to back the company that builds the AI-era utility company. Will intro me to Scott Nolan at his next event." },
+        { id: gid(), date: '2026-05-03', body: 'Quick coffee. He passed on a deal we both saw — said the founder couldn\'t articulate the wedge. "If they can\'t tell you the first 10 customers by name, they don\'t have a business yet."' },
+      ],
+      createdAt: now, lastModified: now,
+    },
+    {
+      id: gid(), type: 'firm', name: 'Anthropic',
+      sector: 'AI Research', hq: 'SF', size: '~600 employees',
+      categories: ['AI Foundation Models'],
+      notes: [
+        { id: gid(), date: '2026-05-01', body: 'Released Claude Opus 4.7 with 200k context (1M for select customers). Tool-use is now their flagship differentiator vs OpenAI. Pricing held at $15/$75 per M tokens — they\'re not racing to the bottom.' },
+      ],
+      createdAt: now, lastModified: now,
+    },
+  ];
+  setState(userId, 'dossier_entities', JSON.stringify(dossier));
+
+  const questionsTopics = [
+    {
+      id: 'topic_demo_ai',
+      title: 'AI Infrastructure',
+      createdAt: now,
+      updatedAt: now,
+      questions: [
+        { id: 'q_demo1', text: 'Why does power consumption now dominate AI training cost more than chips?', createdAt: now },
+        { id: 'q_demo2', text: 'Is on-device inference (Apple Intelligence, Gemini Nano) a real threat to OpenAI/Anthropic, or does the quality gap stay too wide?', createdAt: now },
+      ],
+    },
+  ];
+  setState(userId, 'questions_topics', JSON.stringify(questionsTopics));
+
+  // Trigger embed backfill so the demo user's RAG chat works
+  scheduleEmbedBackfill(userId, 100);
+
+  console.log(`Demo user seeded: ${cards.length} cards, ${concepts.length} concepts, ${dossier.length} dossier entries`);
+  return { cards: cards.length, concepts: concepts.length, dossier: dossier.length, questionsTopics: questionsTopics.length };
+}
+
+// Seed on cold start if the demo user is empty (cheap idempotent check).
+setTimeout(() => {
+  try { seedDemoUser(); } catch (e) { console.warn('Demo seed failed:', e.message); }
+}, 5000);
 
 // Try to load sqlite-vec extension (optional, falls back to JS cosine).
 let useVecExt = false;
@@ -1332,6 +1470,50 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ...result, useVecExt }));
     } catch (err) {
       console.error('Embed backfill error:', err.message);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // ─── Demo seed/reset endpoints ──────────────────────────────────────────
+  // ONLY allowed when the request is hitting the demo host. Prevents anyone
+  // from wiping the production 'demo' user via a curl to lexicon.up.railway.app.
+  if (req.method === 'POST' && req.url === '/api/reset-demo') {
+    if (!isDemoSession(req)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Only available in demo mode (X-Demo-Session header required)' }));
+      return;
+    }
+    try {
+      const userPrefix = 'user:demo:';
+      const stmt = db.prepare('DELETE FROM app_state WHERE key LIKE ?');
+      const r1 = stmt.run(`${userPrefix}%`);
+      const r2 = db.prepare('DELETE FROM embeddings WHERE id LIKE ?').run(`${userPrefix}%`);
+      console.log(`Demo reset: deleted ${r1.changes} app_state rows, ${r2.changes} embeddings`);
+      seedDemoUser();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, appStateDeleted: r1.changes, embeddingsDeleted: r2.changes }));
+    } catch (err) {
+      console.error('Demo reset error:', err.message);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/seed-demo') {
+    if (!isDemoSession(req)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Only available in demo mode (X-Demo-Session header required)' }));
+      return;
+    }
+    try {
+      const result = seedDemoUser();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, ...result }));
+    } catch (err) {
+      console.error('Demo seed error:', err.message);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }
@@ -4754,8 +4936,10 @@ Return JSON:
     return;
   }
 
-  // Serve static files
-  let filePath = req.url === '/' ? '/index.html' : req.url;
+  // Serve static files. Strip the query string before path matching so
+  // /?demo=1 still resolves to /index.html (Node's req.url includes the query).
+  const urlPath = (req.url || '').split('?')[0];
+  let filePath = urlPath === '/' ? '/index.html' : urlPath;
   filePath = path.join(__dirname, filePath);
 
   const ext = path.extname(filePath);

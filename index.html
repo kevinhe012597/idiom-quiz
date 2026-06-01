@@ -1946,6 +1946,12 @@ textarea { resize: vertical; min-height: 80px; }
 </head>
 <body>
 
+<!-- Demo-mode banner. Shown only when running on the demo host. Lets
+     reviewers reset the sandbox or jump to the production URL. -->
+<div id="demo-banner" style="display:none; position:sticky; top:0; z-index:100; background:linear-gradient(90deg, #f59e0b, #fb923c); color:#fff; padding:8px 12px; font-size:0.82rem; font-weight:600; text-align:center; box-shadow:0 1px 4px rgba(0,0,0,0.1);">
+  🧪 Demo mode — sandbox data, no real users. <button onclick="resetDemoData()" style="background:rgba(255,255,255,0.25); border:1px solid rgba(255,255,255,0.4); color:#fff; padding:3px 10px; border-radius:6px; font-size:0.78rem; font-weight:600; cursor:pointer; margin-left:8px;">↻ Reset</button>
+</div>
+
 <div class="container">
   <!-- Module Select Screen -->
   <div id="module-select" class="screen active">
@@ -3530,7 +3536,77 @@ const USER_ID_KEY = 'lexicon-user-id';
 function sanitizeUserId(raw) {
   return String(raw || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 50);
 }
+// Demo mode detection: visiting the app with `?demo=1` (or any truthy demo
+// query param) flips this session into demo mode. The flag is sticky for the
+// browser tab via sessionStorage, so reviewers can navigate around without
+// re-typing the query. Clearing browser data or opening in a new tab resets
+// to production behavior. The server enforces the same lock via the
+// X-Demo-Session: 1 header we attach below.
+const DEMO_SESSION_KEY = 'lexicon-demo-session';
+function detectDemoMode() {
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    if (params.has('demo')) {
+      sessionStorage.setItem(DEMO_SESSION_KEY, '1');
+      // Strip the query param so the URL stays clean for screenshots
+      const cleanUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, document.title, cleanUrl);
+      return true;
+    }
+    return sessionStorage.getItem(DEMO_SESSION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+const IS_DEMO_SESSION = detectDemoMode();
+
+// In demo mode, transparently prefix every localStorage key so demo data
+// lives in its own namespace and never collides with the real user's data.
+// Production Kevin opens his tab → reads 'idiom-quiz-cards' → his 155 cards.
+// Reviewer opens ?demo=1 in another tab → reads 'demo-idiom-quiz-cards' →
+// empty initially, then populated from the server's seeded demo user.
+// Neither tab can read the other's local data.
+if (IS_DEMO_SESSION) {
+  const _ls = window.localStorage;
+  const _gi = _ls.getItem.bind(_ls);
+  const _si = _ls.setItem.bind(_ls);
+  const _ri = _ls.removeItem.bind(_ls);
+  const PREFIX = 'demo-';
+  Object.defineProperty(window, 'localStorage', {
+    value: {
+      getItem: (k) => _gi(PREFIX + k),
+      setItem: (k, v) => _si(PREFIX + k, v),
+      removeItem: (k) => _ri(PREFIX + k),
+      clear: () => {
+        for (let i = _ls.length - 1; i >= 0; i--) {
+          const k = _ls.key(i);
+          if (k && k.startsWith(PREFIX)) _ls.removeItem(k);
+        }
+      },
+      key: (i) => {
+        // Return only prefixed keys, stripped of the prefix
+        const prefixedKeys = [];
+        for (let j = 0; j < _ls.length; j++) {
+          const k = _ls.key(j);
+          if (k && k.startsWith(PREFIX)) prefixedKeys.push(k.slice(PREFIX.length));
+        }
+        return prefixedKeys[i] || null;
+      },
+      get length() {
+        let n = 0;
+        for (let j = 0; j < _ls.length; j++) {
+          const k = _ls.key(j);
+          if (k && k.startsWith(PREFIX)) n++;
+        }
+        return n;
+      },
+    },
+    configurable: true,
+  });
+}
+
 function getCurrentUserId() {
+  if (IS_DEMO_SESSION) return 'demo';
   let id = localStorage.getItem(USER_ID_KEY);
   if (id) return id;
   // No saved id yet → default to 'kevin' immediately. We do NOT call
@@ -3542,14 +3618,37 @@ function getCurrentUserId() {
   localStorage.setItem(USER_ID_KEY, id);
   return id;
 }
-// Resolve once on page load and cache. Sets the value into localStorage if
-// missing, which means the very first window.prompt() blocks the page until
-// the user answers — by design, since we can't make API calls without an id.
 const CURRENT_USER_ID = getCurrentUserId();
+
+// Show the demo banner immediately in demo mode so reviewers see the context
+// before they interact with anything. Production users never see it.
+if (IS_DEMO_SESSION) {
+  document.addEventListener('DOMContentLoaded', () => {
+    const banner = document.getElementById('demo-banner');
+    if (banner) banner.style.display = 'block';
+  });
+}
+
+async function resetDemoData() {
+  if (!confirm('Wipe all demo data and re-seed with examples? This affects everyone using the demo URL.')) return;
+  try {
+    const res = await fetch('/api/reset-demo', { method: 'POST' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    // Clear local caches that mirror server state.
+    ['idiom-quiz-cards', 'lexicon-concepts', 'lexicon-dossier', 'lexicon-questions-topics', 'lexicon-scratchpad']
+      .forEach(k => localStorage.removeItem(k));
+    alert('Demo reset. Reloading…');
+    window.location.reload();
+  } catch (err) {
+    alert('Reset failed: ' + (err.message || 'unknown'));
+  }
+}
 
 // Inject X-User-Id on every /api/* fetch so all server requests are scoped to
 // this user. Wrapping the global fetch covers BOTH apiFetch (POST helper) and
 // raw fetch() calls (GET/PUT). Service worker passes the header through.
+// In demo mode we also send X-Demo-Session: 1 so the server overrides any
+// X-User-Id and forces user='demo' — bulletproof from the server side.
 const _origFetch = window.fetch.bind(window);
 window.fetch = function(input, init) {
   const url = typeof input === 'string' ? input : (input && input.url) || '';
@@ -3558,6 +3657,9 @@ window.fetch = function(input, init) {
     init.headers = new Headers(init.headers || {});
     if (!init.headers.has('X-User-Id')) {
       init.headers.set('X-User-Id', CURRENT_USER_ID);
+    }
+    if (IS_DEMO_SESSION && !init.headers.has('X-Demo-Session')) {
+      init.headers.set('X-Demo-Session', '1');
     }
   }
   return _origFetch(input, init);
