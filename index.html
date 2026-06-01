@@ -535,6 +535,19 @@ textarea { resize: vertical; min-height: 80px; }
   border: none;
   border-radius: 8px;
 }
+.btn-want-review {
+  font-size: 0.8rem;
+  padding: 6px 14px;
+  border: 1px solid var(--accent2);
+  color: var(--accent2);
+  background: var(--surface1);
+  border-radius: 8px;
+}
+.btn-want-review.is-wanted {
+  background: var(--accent2);
+  color: #fff;
+  border-color: var(--accent2);
+}
 .refine-feedback-section {
   margin-bottom: 12px;
   padding: 12px;
@@ -2094,6 +2107,7 @@ textarea { resize: vertical; min-height: 80px; }
       <button class="btn-small btn-edit-review" onclick="editCurrentCard()" title="Edit this card">&#9998; Edit</button>
       <button class="btn-small btn-delete-review" onclick="deleteCurrentCard()" title="Delete this card">&#128465; Delete</button>
       <button class="btn-small btn-refine-review" onclick="toggleRefineFeedback()" title="Tell us how this word should be used" style="background:var(--accent); color:#fff;">&#128172; Refine</button>
+      <button class="btn-small btn-want-review" id="btn-want-review" onclick="toggleWantToLearnCurrent()" title="Add to your Want to Learn list">&#9734; Want</button>
       <button class="btn-small" onclick="skipCurrentCard()" title="Skip to next card without rating" style="margin-left:auto;">Skip &rarr;</button>
     </div>
     <div class="refine-feedback-section" id="refine-feedback-section" style="display:none;">
@@ -3441,6 +3455,7 @@ textarea { resize: vertical; min-height: 80px; }
   <div class="fill-target-card">
     <h3>Choose a Fill in the Blank list</h3>
     <div class="fill-target-grid">
+      <button class="fill-target-btn fill-target-want" onclick="startFillBlank('want')" style="background:var(--accent2);">★ Want to Learn</button>
       <button class="fill-target-btn fill-target-recent" onclick="startFillBlank('recent1')">Recent (1 day)</button>
       <button class="fill-target-btn fill-target-recent" onclick="startFillBlank('recent5')">Recent (5 days)</button>
       <button class="fill-target-btn fill-target-recent" onclick="startFillBlank('recent')">Recent (15 days)</button>
@@ -4118,6 +4133,8 @@ function updateDashboard() {
   document.getElementById('kinda-count').textContent = cards.filter(c => c.bucket === 'kinda').length;
   document.getElementById('nailed-count').textContent = cards.filter(c => c.bucket === 'nailed').length;
   document.getElementById('all-count').textContent = cards.length;
+  const wantEl = document.getElementById('want-count');
+  if (wantEl) wantEl.textContent = cards.filter(c => c.wantToLearn).length;
   document.getElementById('new-count').textContent = cards.filter(c => !c.bucket).length;
 
   const noCards = cards.length === 0;
@@ -4255,6 +4272,7 @@ let historyBrowseIndex = -1; // position within reviewHistory when browsing
 function getCardsByBucket(bucket) {
   if (!bucket) return cards.filter(c => (c.bucket || '') !== 'skip');
   if (bucket === 'new') return cards.filter(c => !c.bucket);
+  if (bucket === 'want') return cards.filter(c => c.wantToLearn && (c.bucket || '') !== 'skip');
   if (bucket === 'recent' || bucket === 'recent5' || bucket === 'recent1') {
     const days = bucket === 'recent1' ? 1 : (bucket === 'recent5' ? 5 : 15);
     const cutoff = new Date();
@@ -4278,7 +4296,8 @@ function bucketLabel(bucket) {
     nope: 'Nope',
     kinda: 'Kinda',
     nailed: 'Nailed it',
-    skip: 'Not Useful'
+    skip: 'Not Useful',
+    want: '★ Want to Learn',
   };
   return labels[bucket] || bucket;
 }
@@ -4746,6 +4765,9 @@ function revealAnswer() {
   // Show follow-up chat
   document.getElementById('vocab-chat').style.display = 'block';
 
+  // Sync the ★ Want / ★ Wanted button to this card's state
+  refreshWantButton();
+
   // Generate example on-the-fly if missing
   if (!card.example) {
     fetchExample(card);
@@ -5011,6 +5033,7 @@ function submitBlankAnswer() {
   document.getElementById('answer-section').classList.add('visible');
   if (card.source) document.getElementById('card-source').style.display = 'block';
   if (!card.example) fetchExample(card);
+  refreshWantButton();
   if (!isDesktopUI()) {
     setTimeout(() => fb.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
   }
@@ -5104,6 +5127,32 @@ function editCurrentCard() {
   // Set a flag so we return to review after saving
   editingFromReview = true;
   showScreen('add-edit');
+}
+
+// Refresh the ★ Want / ★ Wanted button to reflect the current card's state.
+// Called when revealing a card and after toggling, so the button mirrors truth.
+function refreshWantButton() {
+  const btn = document.getElementById('btn-want-review');
+  if (!btn) return;
+  const card = reviewQueue[reviewIndex];
+  const isWanted = !!(card && card.wantToLearn);
+  btn.classList.toggle('is-wanted', isWanted);
+  btn.innerHTML = isWanted ? '★ Wanted' : '☆ Want';
+  btn.title = isWanted ? 'Remove from your Want to Learn list' : 'Add to your Want to Learn list';
+}
+
+// Toggle the wantToLearn flag on the currently-shown review card.
+function toggleWantToLearnCurrent() {
+  const card = reviewQueue[reviewIndex];
+  if (!card) return;
+  card.wantToLearn = !card.wantToLearn;
+  card.wantToLearnAt = card.wantToLearn ? new Date().toISOString() : null;
+  // Persist the change to the main cards array (reviewQueue holds the same refs).
+  const idx = cards.findIndex(c => c.id === card.id);
+  if (idx !== -1) cards[idx] = card;
+  saveCards(cards);
+  refreshWantButton();
+  showToast(card.wantToLearn ? `★ Added "${card.phrase}" to Want to Learn` : `Removed "${card.phrase}" from Want to Learn`);
 }
 
 function toggleRefineFeedback() {
@@ -5328,7 +5377,7 @@ function setFilter(filter) {
 }
 
 function showBucket(bucket) {
-  const labels = { nope: 'Nope', kinda: 'Kinda', nailed: 'Nailed it', skip: 'Not Useful', new: 'New', all: 'All Cards' };
+  const labels = { nope: 'Nope', kinda: 'Kinda', nailed: 'Nailed it', skip: 'Not Useful', new: 'New', all: 'All Cards', want: '★ Want to Learn' };
   // 'all' is the no-filter case — set activeBucket to null so renderBrowseList shows everything.
   activeBucket = (bucket === 'all') ? null : bucket;
   showScreen('browse');
@@ -5346,6 +5395,7 @@ function renderBrowseList() {
   let filtered = cards;
   if (activeBucket) {
     if (activeBucket === 'new') filtered = filtered.filter(c => !c.bucket);
+    else if (activeBucket === 'want') filtered = filtered.filter(c => c.wantToLearn);
     else filtered = filtered.filter(c => c.bucket === activeBucket);
   }
   if (activeFilter !== 'all') {
